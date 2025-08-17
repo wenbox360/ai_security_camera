@@ -13,12 +13,13 @@ from config.settings import Settings
 class CameraManager:
     """Camera manager with dual capture capabilities"""
     
-    def __init__(self):
+    def __init__(self, motion_callback=None):
         """Initialize camera manager"""
         self.picam2 = None
         self.is_initialized = False
         self.capture_thread = None
         self.camera_busy = threading.Event()  # Event to signal camera is busy
+        self.motion_callback = motion_callback  # Callback for motion events
         
         # Get configurations from settings
         self.high_res_config = Settings.get_high_res_config()
@@ -140,6 +141,13 @@ class CameraManager:
                 print("Motion capture complete!")
                 print(f"   Snapshot: {snapshot_file}")
                 print(f"   Video: {video_file}")
+                
+                # Trigger callback for motion event processing
+                if self.motion_callback:
+                    try:
+                        self.motion_callback(capture_info)
+                    except Exception as e:
+                        print(f"Motion callback error: {e}")
             else:
                 print("Motion capture partially failed")
                 
@@ -192,6 +200,10 @@ class CameraManager:
     def camera_is_busy(self):
         """Check if camera is currently busy with capture"""
         return self.camera_busy.is_set()
+    
+    def set_motion_callback(self, callback):
+        """Set callback function for motion events"""
+        self.motion_callback = callback
     
     def get_camera_info(self):
         """Get camera status information"""

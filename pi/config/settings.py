@@ -30,6 +30,11 @@ VIDEOS_DIR = "captures/videos/"
 # Yolo Model Settings
 YOLO_MODEL = "yolo11n.pt"
 
+# Behavior Analysis Settings - Video-based Dwelling Detection
+DWELLING_THRESHOLD = 30  # seconds - minimum time to consider dwelling
+VIDEO_FRAME_SKIP = 3  # analyze every nth frame for efficiency
+MIN_PERSON_CONFIDENCE = 0.5  # minimum YOLO confidence for person detection
+
 class Settings:
     """Settings configuration class"""
     
@@ -70,3 +75,18 @@ class Settings:
     @staticmethod
     def get_yolo_model():
         return YOLO_MODEL
+    
+    @staticmethod
+    def get_loitering_threshold():
+        """Get dwelling threshold in seconds"""
+        return DWELLING_THRESHOLD
+    
+    @staticmethod
+    def get_video_frame_skip():
+        """Get frame skip interval for video analysis"""
+        return VIDEO_FRAME_SKIP
+    
+    @staticmethod
+    def get_min_person_confidence():
+        """Get minimum confidence for person detection"""
+        return MIN_PERSON_CONFIDENCE
