@@ -168,16 +168,33 @@ class CameraManager:
         Runs in background thread
         """
         def motion_worker():
+            consecutive_busy_count = 0
+            max_consecutive_busy = 3
+            
             while True:
                 try:
                     # WAIT FOR MOTION EVENT FROM PIR
                     if pir_sensor and pir_sensor.wait_for_motion(timeout=10):
                         print("Camera Thread: Motion event received!")
                         
-                        # Trigger dual capture in separate thread to avoid blocking
-                        capture_thread = threading.Thread(target=self.motion_triggered_capture)
-                        capture_thread.daemon = True
-                        capture_thread.start()
+                        # Check if camera is already busy
+                        if self.camera_busy.is_set():
+                            consecutive_busy_count += 1
+                            if consecutive_busy_count <= max_consecutive_busy:
+                                print(f"Camera Thread: Camera busy, skipping motion event ({consecutive_busy_count}/{max_consecutive_busy})")
+                            elif consecutive_busy_count == max_consecutive_busy + 1:
+                                print("Camera Thread: Camera busy for too long, will force reset soon...")
+                            elif consecutive_busy_count >= max_consecutive_busy + 5:
+                                print("Camera Thread: Forcing camera reset due to extended busy state")
+                                self.camera_busy.clear()
+                                consecutive_busy_count = 0
+                            continue
+                        
+                        # Reset consecutive busy counter on successful processing
+                        consecutive_busy_count = 0
+                        
+                        # Trigger dual capture in current thread to maintain control
+                        self.motion_triggered_capture()
                         
                     else:
                         # Timeout - just continue monitoring
@@ -186,6 +203,8 @@ class CameraManager:
                         
                 except Exception as e:
                     print(f"Motion monitoring error: {e}")
+                    # Clear busy flag on error to prevent permanent lock
+                    self.camera_busy.clear()
                     time.sleep(1)
         
         # Start the motion monitoring thread
@@ -219,15 +238,26 @@ class CameraManager:
     def cleanup(self):
         """Clean up camera resources"""
         try:
-            # Clear busy flag
+            # Clear busy flag first
             self.camera_busy.clear()
             
+            # Stop any ongoing operations
             if self.picam2:
-                self.picam2.stop()
-                self.picam2.close()
-                
+                try:
+                    self.picam2.stop()
+                except:
+                    pass  # Ignore if already stopped
+                    
+                try:
+                    self.picam2.close()
+                except:
+                    pass  # Ignore if already closed
+                    
             self.is_initialized = False
             print("Camera cleaned up")
             
         except Exception as e:
             print(f"Camera cleanup error: {e}")
+            # Force cleanup even if errors occur
+            self.camera_busy.clear()
+            self.is_initialized = False
