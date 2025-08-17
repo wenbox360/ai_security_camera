@@ -27,6 +27,11 @@ CAPTURES_DIR = "captures/"
 SNAPSHOTS_DIR = "captures/snapshots/"
 VIDEOS_DIR = "captures/videos/"
 
+# Face Recognition Settings
+FACE_EMBEDDINGS_FILE = "captures/known_faces/embeddings.json"
+FACE_IMAGES_DIR = "captures/known_faces/images/"
+FACE_METADATA_FILE = "captures/known_faces/metadata.json"
+
 # Yolo Model Settings
 YOLO_MODEL = "yolo11n.pt"
 
@@ -71,6 +76,21 @@ class Settings:
             "snapshots": SNAPSHOTS_DIR,
             "videos": VIDEOS_DIR
         }
+    
+    @staticmethod
+    def get_face_embeddings_path():
+        """Get path to face embeddings file"""
+        return FACE_EMBEDDINGS_FILE
+    
+    @staticmethod
+    def get_face_images_dir():
+        """Get directory for face images"""
+        return FACE_IMAGES_DIR
+    
+    @staticmethod
+    def get_face_metadata_path():
+        """Get path to face metadata file"""
+        return FACE_METADATA_FILE
     
     @staticmethod
     def get_yolo_model():

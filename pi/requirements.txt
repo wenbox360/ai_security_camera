@@ -12,3 +12,5 @@ picamera2>=0.3.0           # Raspberry Pi camera interface
 
 # GPIO and Hardware (Raspberry Pi only)
 RPi.GPIO>=0.7.0            # GPIO control for PIR sensor
+
+# Note: may have to sudo apt-get install libcap-dev + cmake
