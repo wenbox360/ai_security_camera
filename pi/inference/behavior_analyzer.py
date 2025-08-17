@@ -67,36 +67,60 @@ class BehaviorAnalyzer:
             }
     
     def _analyze_video_file(self, video_path, yolo_handler):
-        """Analyze video file for dwelling patterns"""
+        """Analyze video file for dwelling patterns with improved error handling"""
         try:
             import cv2
             import numpy as np
         except ImportError:
-            return {
-                'dwelling_detected': False,
-                'confidence': 0,
-                'message': 'OpenCV not available for video analysis',
-                'error': 'Missing cv2 dependency'
-            }
+            return self._create_error_result('OpenCV not available for video analysis', 'Missing cv2 dependency')
+        
+        # Wait a moment for file to be fully written
+        time.sleep(0.5)
         
         # Open video file
         cap = cv2.VideoCapture(video_path)
         
         if not cap.isOpened():
-            return {
-                'dwelling_detected': False,
-                'confidence': 0,
-                'message': 'Could not open video file',
-                'error': 'Video file access failed'
-            }
+            return self._create_error_result('Could not open video file', 'Video file access failed')
         
-        # Get video properties
-        fps = cap.get(cv2.CAP_PROP_FPS) or 30  # Default to 30 if not available
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        video_duration = total_frames / fps if fps > 0 else 0
+        try:
+            # Get video properties with validation
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            
+            # Validate video properties
+            if fps <= 0 or fps > 120:  # Reasonable FPS range
+                print(f"❌ Invalid FPS: {fps}, using default 30")
+                fps = 30.0
+                
+            if total_frames <= 0:
+                print(f"❌ Invalid frame count: {total_frames}")
+                cap.release()
+                return self._create_error_result('Invalid video frame count', 'Corrupt video file')
+                
+            if total_frames > 100000:  # Sanity check for very long videos
+                print(f"⚠️  Very large frame count: {total_frames}, limiting analysis")
+                total_frames = min(total_frames, 1800)  # Limit to ~1 minute at 30fps
+                
+            video_duration = total_frames / fps
+            
+            # Additional validation
+            if video_duration <= 0:
+                print(f"❌ Invalid video duration: {video_duration}s")
+                cap.release()
+                return self._create_error_result('Invalid video duration', 'Duration calculation failed')
+                
+            if video_duration > 3600:  # Max 1 hour
+                print(f"⚠️  Very long video: {video_duration}s, limiting analysis")
+                video_duration = min(video_duration, 60.0)  # Limit analysis to 1 minute
+                
+            print(f"Analyzing video: {video_path}")
+            print(f"Duration: {video_duration:.1f}s, FPS: {fps:.1f}, Frames: {total_frames}")
         
-        print(f"Analyzing video: {video_path}")
-        print(f"Duration: {video_duration:.1f}s, FPS: {fps}, Frames: {total_frames}")
+        except Exception as e:
+            print(f"❌ Error reading video properties: {e}")
+            cap.release()
+            return self._create_error_result(f'Error reading video properties: {str(e)}', str(e))
         
         # Analysis data
         person_detections = []
@@ -313,6 +337,17 @@ class BehaviorAnalyzer:
         """Reset analysis history (useful for testing or periodic cleanup)"""
         self.video_analysis_history.clear()
         print("Behavior analyzer history reset")
+    
+    def _create_error_result(self, message, error_detail):
+        """Create standardized error result for failed video analysis"""
+        return {
+            'dwelling_detected': False,
+            'confidence': 0.0,
+            'total_detections': 0,
+            'message': message,
+            'error': error_detail,
+            'analysis_success': False
+        }
     
     def process_motion_capture_result(self, capture_result, yolo_handler):
         """

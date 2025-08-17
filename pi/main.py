@@ -202,36 +202,57 @@ class SecurityCameraSystem:
     def _evaluate_security_event(self, dwelling_analysis, known_people, unknown_people, face_analysis):
         """Evaluate security event and determine appropriate response"""
         
-        # Log the event
-        log_entry = self.security_logger.log_dwelling_event(
-            dwelling_analysis, known_people, unknown_people
-        )
+        # Ensure known_people and unknown_people are properly handled
+        if isinstance(known_people, list):
+            known_people_count = len(known_people)
+            known_people_list = known_people
+        else:
+            known_people_count = known_people if known_people else 0
+            known_people_list = []
+            
+        if isinstance(unknown_people, list):
+            unknown_people_count = len(unknown_people)
+        else:
+            unknown_people_count = unknown_people if unknown_people else 0
         
-        # Log face recognition if available
-        if face_analysis:
-            self.security_logger.log_face_recognition_event(face_analysis)
+        try:
+            # Log the event
+            log_entry = self.security_logger.log_dwelling_event(
+                dwelling_analysis, known_people_count, unknown_people_count
+            )
+            
+            # Log face recognition if available
+            if face_analysis:
+                self.security_logger.log_face_recognition_event(face_analysis)
+        except Exception as e:
+            print(f"Motion callback error: {e}")
+            return
         
         # Determine response based on analysis
-        dwelling_detected = dwelling_analysis['dwelling_detected']
-        has_unknown_people = unknown_people > 0
+        dwelling_detected = dwelling_analysis.get('dwelling_detected', False)
+        has_unknown_people = unknown_people_count > 0
         
         if dwelling_detected and has_unknown_people:
             print("🚨 SECURITY ALERT: Unknown person dwelling detected!")
             print(f"   Duration: {dwelling_analysis.get('longest_continuous_presence', 0):.1f}s")
-            print(f"   Confidence: {dwelling_analysis['confidence']:.2f}")
-            print(f"   Unknown people: {unknown_people}")
+            print(f"   Confidence: {dwelling_analysis.get('confidence', 0):.2f}")
+            print(f"   Unknown people: {unknown_people_count}")
             
-        elif dwelling_detected and known_people:
+        elif dwelling_detected and known_people_count > 0:
             print("⚠️  Known person dwelling detected")
             print(f"   Duration: {dwelling_analysis.get('longest_continuous_presence', 0):.1f}s")
-            print(f"   Known people: {', '.join([p.get('name', 'Unknown') for p in known_people])}")
+            if known_people_list:
+                names = [p.get('name', 'Unknown') for p in known_people_list]
+                print(f"   Known people: {', '.join(names)}")
             
         elif has_unknown_people:
             print("👁️  Unknown person detected (brief presence)")
             
-        elif known_people:
+        elif known_people_count > 0:
             print("✅ Known person detected")
-            print(f"   People: {', '.join([p.get('name', 'Unknown') for p in known_people])}")
+            if known_people_list:
+                names = [p.get('name', 'Unknown') for p in known_people_list]
+                print(f"   People: {', '.join(names)}")
             
         else:
             print("ℹ️  Motion detected - person analysis inconclusive")

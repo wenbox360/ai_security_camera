@@ -54,31 +54,51 @@ class PIRSensor:
     def _monitor_motion(self):
         """Background thread to monitor motion and trigger events"""
         last_motion_time = 0
-        debounce_delay = 5.0  # Wait 5 seconds between detections
+        debounce_delay = 10.0  # Increased to 10 seconds between detections
+        consecutive_skips = 0
+        max_consecutive_skips = 5
         
         while self.is_monitoring:
-            if self.is_motion_detected():
+            try:
                 current_time = time.time()
                 
-                # Debounce - prevent rapid triggers
-                if current_time - last_motion_time > debounce_delay:
-                    # CHECK IF CAMERA IS BUSY - Don't trigger if busy
-                    if self.camera_manager and self.camera_manager.camera_is_busy():
-                        print(f"PIR: Motion detected but camera busy, skipping...")
-                        time.sleep(0.1)
-                        continue
-                    
-                    last_motion_time = current_time
-                    print(f"PIR: Motion detected at {time.strftime('%H:%M:%S')}")
-                    
-                    # SIGNAL CAMERA THREAD ONLY IF NOT BUSY
-                    self.motion_event.set()
-                    
-                    # Keep event set briefly then clear
+                if self.is_motion_detected():
+                    # Debounce - prevent rapid triggers
+                    if current_time - last_motion_time > debounce_delay:
+                        # CHECK IF CAMERA IS BUSY - Don't trigger if busy
+                        if self.camera_manager and self.camera_manager.camera_is_busy():
+                            consecutive_skips += 1
+                            if consecutive_skips <= max_consecutive_skips:
+                                print(f"PIR: Motion detected but camera busy, skipping... ({consecutive_skips}/{max_consecutive_skips})")
+                            elif consecutive_skips == max_consecutive_skips + 1:
+                                print("PIR: Camera busy for too long, reducing frequency...")
+                            time.sleep(2.0)  # Wait longer when camera is busy
+                            continue
+                        
+                        # Reset skip counter on successful trigger
+                        consecutive_skips = 0
+                        last_motion_time = current_time
+                        print(f"PIR: Motion detected at {time.strftime('%H:%M:%S')}")
+                        
+                        # SIGNAL CAMERA THREAD
+                        self.motion_event.set()
+                        
+                        # Wait longer after triggering to prevent immediate retriggering
+                        time.sleep(1.0)
+                        self.motion_event.clear()
+                        
+                        # Additional cooldown period
+                        time.sleep(2.0)
+                    else:
+                        # Still in debounce period
+                        time.sleep(0.5)
+                else:
+                    # No motion detected, short sleep
                     time.sleep(0.1)
-                    self.motion_event.clear()
-            
-            time.sleep(0.1)  # Small delay to prevent excessive CPU usage
+                    
+            except Exception as e:
+                print(f"PIR monitoring error: {e}")
+                time.sleep(1.0)
     
     def wait_for_motion(self, timeout=None):
         """Wait for motion detection event - used by camera thread"""
