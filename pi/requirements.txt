@@ -12,6 +12,3 @@ picamera2>=0.3.0           # Raspberry Pi camera interface
 
 # GPIO and Hardware (Raspberry Pi only)
 RPi.GPIO>=0.7.0            # GPIO control for PIR sensor
-
-# Utilities
-python-dateutil>=2.8.0     # Date/time utilities
