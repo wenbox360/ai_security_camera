@@ -7,7 +7,6 @@ import os
 import sys
 import time
 import signal
-import threading
 from datetime import datetime
 
 # Add the current directory to Python path
@@ -283,48 +282,9 @@ class SecurityCameraSystem:
             
         except Exception as e:
             print(f"⚠️  Warning during shutdown: {e}")
+
     
-    def get_system_status(self):
-        """Get current system status"""
-        return {
-            'system_ready': self.system_ready,
-            'is_running': self.is_running,
-            'camera_ready': self.camera_manager.is_initialized if self.camera_manager else False,
-            'pir_active': self.pir_sensor.is_monitoring if self.pir_sensor else False,
-            'camera_busy': self.camera_manager.camera_is_busy() if self.camera_manager else False,
-            'config_queue': self.config_queue.get_queue_status() if self.config_queue else None
-        }
-    
-    # Configuration API methods (for external access)
-    def update_yolo_confidence(self, confidence: float, priority: int = 1) -> str:
-        """Update YOLO confidence threshold via configuration queue"""
-        if not self.config_queue:
-            return None
-        return self.config_queue.update_yolo_confidence(confidence, priority)
-    
-    def add_trusted_person(self, name: str, image_data: bytes, priority: int = 1) -> str:
-        """Add trusted person via configuration queue"""
-        if not self.config_queue:
-            return None
-        return self.config_queue.add_trusted_person(name, image_data, priority)
-    
-    def remove_trusted_person(self, name: str, priority: int = 1) -> str:
-        """Remove trusted person via configuration queue"""
-        if not self.config_queue:
-            return None
-        return self.config_queue.remove_trusted_person(name, priority)
-    
-    def update_dwelling_threshold(self, threshold: float, priority: int = 1) -> str:
-        """Update dwelling detection threshold via configuration queue"""
-        if not self.config_queue:
-            return None
-        return self.config_queue.update_dwelling_threshold(threshold, priority)
-    
-    def get_config_request_status(self, request_id: str):
-        """Get status of a configuration request"""
-        if not self.config_queue:
-            return None
-        return self.config_queue.get_request_status(request_id)
+
 
 
 def main():
