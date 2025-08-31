@@ -7,7 +7,7 @@ import threading
 import numpy as np
 from datetime import datetime
 from picamera2 import Picamera2
-from picamera2.encoders import H264Encoder
+from picamera2.encoders import H264Encoder, MJPEGEncoder
 from config.settings import Settings
 
 class CameraManager:
@@ -80,7 +80,7 @@ class CameraManager:
             return None
     
     def record_low_res_video(self, filename=None):
-        """Record low resolution video for specified duration"""
+        """Record low resolution video for specified duration with proper H.264 finalization"""
         if not self.is_initialized:
             print("Camera not initialized")
             return None
@@ -95,8 +95,12 @@ class CameraManager:
             self.picam2.switch_mode(self.video_config)
             time.sleep(0.5)  # Let camera adjust
             
-            # Setup encoder
-            encoder = H264Encoder(bitrate=self.video_settings["bitrate"])
+            # Setup encoder with improved settings for metadata integrity
+            encoder = H264Encoder(
+                bitrate=self.video_settings["bitrate"],
+                repeat=True,  # Ensures proper frame sequencing
+                iperiod=30   # Insert I-frames every 30 frames for better seeking
+            )
             
             # Start recording
             self.picam2.start_recording(encoder, filename)
@@ -104,14 +108,49 @@ class CameraManager:
             
             # Record for specified duration
             time.sleep(self.video_settings["duration"])
-
-            # Stop recording
-            self.picam2.stop_recording()
+            
+            # Ensure proper stream finalization
+            try:
+                # Give encoder time to finalize current frame
+                time.sleep(0.1)
+                
+                # Stop recording gracefully
+                self.picam2.stop_recording()
+                
+                # Additional time for encoder to write final metadata
+                time.sleep(0.2)
+                
+            except Exception as stop_error:
+                print(f"Warning during recording stop: {stop_error}")
+                # Still try to clean up
+                try:
+                    self.picam2.stop_recording()
+                except:
+                    pass
+            
             print(f"Video recording complete: {filename}")
+            
+            # Verify the file was created and has reasonable size
+            import os
+            if os.path.exists(filename):
+                file_size = os.path.getsize(filename)
+                if file_size < 1000:  # Less than 1KB is suspicious
+                    print(f"⚠️  Warning: Video file suspiciously small ({file_size} bytes)")
+                else:
+                    print(f"✅ Video file created successfully ({file_size} bytes)")
+            else:
+                print(f"❌ Video file was not created: {filename}")
+                return None
+                
             return filename
             
         except Exception as e:
             print(f"Video recording failed: {e}")
+            # Ensure recording is stopped even on error
+            try:
+                self.picam2.stop_recording()
+            except:
+                pass
             return None
     
     def motion_triggered_capture(self):
