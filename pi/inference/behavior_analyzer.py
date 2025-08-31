@@ -83,39 +83,41 @@ class BehaviorAnalyzer:
         if not cap.isOpened():
             return self._create_error_result('Could not open video file', 'Video file access failed')
         
+        # Initialize variables that will be used later
+        frame_count_reliable = False
+        video_duration = -1
+        total_frames = -1
+        fps = 30.0  # Default FPS
+        
         try:
             # Get video properties with validation
             fps = cap.get(cv2.CAP_PROP_FPS)
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             
-            # Validate video properties
+            # Validate and fix FPS
             if fps <= 0 or fps > 120:  # Reasonable FPS range
                 print(f"❌ Invalid FPS: {fps}, using default 30")
                 fps = 30.0
                 
-            if total_frames <= 0:
-                print(f"❌ Invalid frame count: {total_frames}")
-                cap.release()
-                return self._create_error_result('Invalid video frame count', 'Corrupt video file')
+            # Check if frame count is reliable
+            frame_count_reliable = False
+            if total_frames > 0 and total_frames <= 100000:  # Reasonable range
+                frame_count_reliable = True
+                video_duration = total_frames / fps
+            else:
+                print(f"❌ Invalid frame count: {total_frames}, will calculate dynamically")
+                total_frames = -1  # Mark as unknown
+                video_duration = -1  # Will be calculated while reading
                 
-            if total_frames > 100000:  # Sanity check for very long videos
-                print(f"⚠️  Very large frame count: {total_frames}, limiting analysis")
-                total_frames = min(total_frames, 1800)  # Limit to ~1 minute at 30fps
-                
-            video_duration = total_frames / fps
-            
-            # Additional validation
-            if video_duration <= 0:
-                print(f"❌ Invalid video duration: {video_duration}s")
-                cap.release()
-                return self._create_error_result('Invalid video duration', 'Duration calculation failed')
-                
-            if video_duration > 3600:  # Max 1 hour
-                print(f"⚠️  Very long video: {video_duration}s, limiting analysis")
-                video_duration = min(video_duration, 60.0)  # Limit analysis to 1 minute
+            # For H.264 files, frame count is often unreliable, so we'll calculate it manually
+            if not frame_count_reliable:
+                print("📊 Frame count unreliable, will count frames during analysis...")
                 
             print(f"Analyzing video: {video_path}")
-            print(f"Duration: {video_duration:.1f}s, FPS: {fps:.1f}, Frames: {total_frames}")
+            if frame_count_reliable:
+                print(f"Duration: {video_duration:.1f}s, FPS: {fps:.1f}, Frames: {total_frames}")
+            else:
+                print(f"FPS: {fps:.1f}, Frame count: will be determined dynamically")
         
         except Exception as e:
             print(f"❌ Error reading video properties: {e}")
@@ -127,6 +129,7 @@ class BehaviorAnalyzer:
         frame_count = 0
         frames_with_people = 0
         total_people_detected = 0
+        actual_total_frames = 0  # Count frames as we read them
         
         # Analyze frames
         while True:
@@ -135,6 +138,7 @@ class BehaviorAnalyzer:
                 break
             
             frame_count += 1
+            actual_total_frames += 1
             
             # Skip frames for efficiency (analyze every nth frame)
             if frame_count % self.frame_skip != 0:
@@ -161,6 +165,22 @@ class BehaviorAnalyzer:
                 })
         
         cap.release()
+        
+        # Calculate actual video duration if it wasn't reliable from metadata
+        if total_frames <= 0 or not frame_count_reliable:
+            video_duration = actual_total_frames / fps
+            total_frames = actual_total_frames
+            print(f"✅ Calculated video duration: {video_duration:.1f}s ({actual_total_frames} frames)")
+        
+        # Validate final video duration and frame count
+        if video_duration <= 0 or actual_total_frames <= 0:
+            return self._create_error_result('Video has zero duration or no frames', 'Empty or corrupt video file')
+        
+        # Additional safety check - ensure we have some meaningful data
+        if actual_total_frames < 5:  # Less than 5 frames is probably not useful
+            return self._create_error_result(f'Video too short: only {actual_total_frames} frames', 'Insufficient video data')
+        
+        print(f"✅ Video analysis complete: {actual_total_frames} frames, {video_duration:.1f}s duration")
         
         # Analyze dwelling patterns
         dwelling_analysis = self._analyze_dwelling_patterns(
