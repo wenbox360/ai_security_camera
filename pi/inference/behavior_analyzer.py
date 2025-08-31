@@ -5,7 +5,6 @@ Video-based analyzer focused on people dwelling detection
 
 import time
 import cv2
-import numpy as np
 from datetime import datetime
 from collections import deque
 from config.settings import Settings
@@ -17,7 +16,6 @@ class BehaviorAnalyzer:
         """Initialize behavior analyzer"""
         # Detection history storage for dwelling analysis
         self.video_analysis_history = deque(maxlen=20)  # Store last 20 video analyses
-        self.current_analysis = None
         
         # Dwelling thresholds from settings
         self.dwelling_threshold = Settings.get_loitering_threshold()  # seconds
@@ -126,7 +124,6 @@ class BehaviorAnalyzer:
         person_detections = []
         frame_count = 0
         frames_with_people = 0
-        total_people_detected = 0
         
         # Analyze frames
         while True:
@@ -149,7 +146,6 @@ class BehaviorAnalyzer:
             
             if people_in_frame:
                 frames_with_people += 1
-                total_people_detected += len(people_in_frame)
                 
                 # Store detection data
                 frame_time = frame_count / fps
@@ -287,56 +283,6 @@ class BehaviorAnalyzer:
                 return f"Brief presence: {avg_people:.1f} person(s) for {longest_presence:.1f}s ({presence_percentage:.1f}% of video)"
             else:
                 return "Minimal person presence detected"
-    
-    def get_dwelling_summary(self, time_window=300):
-        """
-        Get summary of dwelling activity from recent video analyses
-        
-        Args:
-            time_window: Time window in seconds (default: 5 minutes)
-            
-        Returns:
-            dict: Dwelling activity summary
-        """
-        current_time = time.time()
-        cutoff_time = current_time - time_window
-        
-        recent_analyses = [event for event in self.video_analysis_history 
-                          if event['timestamp'] >= cutoff_time]
-        
-        if not recent_analyses:
-            return {
-                'total_videos_analyzed': 0,
-                'dwelling_events': 0,
-                'average_confidence': 0,
-                'total_dwelling_time': 0
-            }
-        
-        # Calculate statistics
-        total_videos = len(recent_analyses)
-        dwelling_events = len([a for a in recent_analyses if a['analysis']['dwelling_detected']])
-        
-        # Calculate average confidence for dwelling events
-        dwelling_confidences = [a['analysis']['confidence'] for a in recent_analyses 
-                               if a['analysis']['dwelling_detected']]
-        avg_confidence = sum(dwelling_confidences) / len(dwelling_confidences) if dwelling_confidences else 0
-        
-        # Calculate total dwelling time
-        total_dwelling_time = sum(a['analysis'].get('people_presence_time', 0) for a in recent_analyses)
-        
-        return {
-            'total_videos_analyzed': total_videos,
-            'dwelling_events': dwelling_events,
-            'dwelling_rate': (dwelling_events / total_videos) * 100 if total_videos > 0 else 0,
-            'average_confidence': round(avg_confidence, 2),
-            'total_dwelling_time': round(total_dwelling_time, 1),
-            'time_window_minutes': time_window / 60
-        }
-    
-    def reset_history(self):
-        """Reset analysis history (useful for testing or periodic cleanup)"""
-        self.video_analysis_history.clear()
-        print("Behavior analyzer history reset")
     
     def _create_error_result(self, message, error_detail):
         """Create standardized error result for failed video analysis"""
