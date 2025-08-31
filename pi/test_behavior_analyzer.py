@@ -33,7 +33,9 @@ def create_test_video(filename, duration_seconds=3, fps=30):
         
         # Add some visual content that changes over time
         color_intensity = int((frame_num / total_frames) * 255)
-        frame[:, :] = [color_intensity, 100, 200 - color_intensity]
+        # Ensure color values are within valid range (0-255)
+        blue_value = max(0, min(255, 200 - color_intensity))
+        frame[:, :] = [color_intensity, 100, blue_value]
         
         # Add frame number text
         cv2.putText(frame, f'Frame {frame_num}', (50, 50), 
@@ -183,11 +185,37 @@ def test_with_h264_video():
     h264_file = h264_files[0]
     print(f"Testing H.264 file: {h264_file}")
     
-    if test_video_properties(h264_file):
-        print("✅ H.264 video properties test passed")
-        return True
-    else:
-        print("❌ H.264 video properties test failed")
+    # Test the video properties first to see the problematic frame count
+    properties_test = test_video_properties(h264_file)
+    
+    # Now test if our behavior analyzer can handle it despite the bad frame count
+    print(f"\n🧠 Testing BehaviorAnalyzer with problematic H.264 file...")
+    
+    class MockYOLOHandler:
+        """Mock YOLO handler for testing"""
+        def process_frame(self, frame):
+            return {'detections': []}
+    
+    try:
+        analyzer = BehaviorAnalyzer()
+        mock_yolo = MockYOLOHandler()
+        
+        result = analyzer.analyze_video_for_dwelling(h264_file, mock_yolo)
+        
+        print(f"📋 H.264 Analysis Results:")
+        print(f"   Error Present: {'error' in result}")
+        print(f"   Dwelling Detected: {result.get('dwelling_detected', False)}")
+        print(f"   Message: {result.get('message', 'No message')}")
+        
+        if 'error' in result:
+            print(f"❌ Error: {result['error']}")
+            return False
+        else:
+            print(f"✅ BehaviorAnalyzer successfully handled H.264 file despite bad metadata!")
+            return True
+            
+    except Exception as e:
+        print(f"❌ Exception during H.264 analysis: {e}")
         return False
 
 def main():
