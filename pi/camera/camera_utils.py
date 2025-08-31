@@ -105,7 +105,8 @@ class CameraManager:
             # Generate filename if not provided
             if filename is None:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"{self.file_paths['videos']}video_{timestamp}.{self.video_settings['format']}"
+                video_format = self.video_settings["format"]
+                filename = f"{self.file_paths['videos']}video_{timestamp}.{video_format}"
             
             # Switch to video configuration with better error handling
             try:
@@ -127,12 +128,16 @@ class CameraManager:
                     print(f"Camera Thread: Mode recovery failed: {recovery_error}")
                     raise
             
-            # Setup encoder with improved settings for metadata integrity
+            # Setup encoder with improved settings
             encoder = H264Encoder(
                 bitrate=self.video_settings["bitrate"],
-                repeat=True,  # Ensures proper frame sequencing
-                iperiod=30   # Insert I-frames every 30 frames for better seeking
+                repeat=True,
+                iperiod=30
             )
+            
+            # For MP4 format, the container will store proper metadata
+            if video_format == "mp4":
+                print("Camera Thread: Recording MP4 for better metadata compatibility")
             
             # Start recording
             self.picam2.start_recording(encoder, filename)
