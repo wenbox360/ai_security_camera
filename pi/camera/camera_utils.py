@@ -1,232 +1,31 @@
 """
-Minimal Camera utilities - Focus on fixing frame count issue
+Camera utilities for PiCamera2
 """
 
 import time
 import threading
+import numpy as np
 from datetime import datetime
 from picamera2 import Picamera2
 from picamera2.encoders import H264Encoder
+from config.settings import Settings
 
 class CameraManager:
-    """Minimal camera manager focused on video recording"""
+    """Camera manager with dual capture capabilities"""
     
-    def __init__(self):
-        """Initialize minimal camera manager"""
+    def __init__(self, motion_callback=None):
+        """Initialize camera manager"""
         self.picam2 = None
         self.is_initialized = False
+        self.capture_thread = None
+        self.camera_busy = threading.Event()  # Event to signal camera is busy
+        self.motion_callback = motion_callback  # Callback for motion events
         
-        # Minimal configs
-        self.high_res_config = {"format": "RGB888", "size": (1920, 1080)}
-        self.low_res_config = {"format": "RGB888", "size": (640, 480)}
-        self.video_format = "mp4"  # Force MP4 format
-        self.video_duration = 1
-        self.video_bitrate = 1000000
-
-    def setup(self):
-        """Initialize camera"""
-        try:
-            self.picam2 = Picamera2()
-            
-            # Simple photo config
-            self.photo_config = self.picam2.create_still_configuration(
-                main=self.high_res_config
-            )
-            
-            # Simple video config
-            self.video_config = self.picam2.create_video_configuration(
-                main=self.low_res_config
-            )
-            
-            # Start with photo config
-            self.picam2.configure(self.photo_config)
-            self.picam2.start()
-            time.sleep(2)  # Camera stabilization
-            
-            self.is_initialized = True
-            print("✅ Camera initialized successfully")
-            return True
-            
-        except Exception as e:
-            print(f"❌ Camera setup failed: {e}")
-            return False
-    
-    def record_video_simple(self, filename=None):
-        """Simple video recording with MP4 format"""
-        if not self.is_initialized:
-            print("❌ Camera not initialized")
-            return None
-            
-        try:
-            # Generate filename
-            if filename is None:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"captures/videos/test_video_{timestamp}.{self.video_format}"
-            
-            print(f"🔴 Recording {self.video_format.upper()} video: {filename}")
-            
-            # Switch to video mode
-            self.picam2.switch_mode(self.video_config)
-            time.sleep(1.0)  # Let camera adjust
-            print("✅ Video mode activated")
-            
-            # Simple H264 encoder
-            encoder = H264Encoder(bitrate=self.video_bitrate)
-            
-            # Start recording
-            self.picam2.start_recording(encoder, filename)
-            print(f"▶️  Recording started...")
-            
-            # Record for duration
-            time.sleep(self.video_duration)
-            
-            # Stop recording
-            self.picam2.stop_recording()
-            time.sleep(0.2)  # Let encoder finish
-            
-            print(f"⏹️  Recording complete: {filename}")
-            
-            # Verify file
-            import os
-            if os.path.exists(filename):
-                file_size = os.path.getsize(filename)
-                print(f"📊 File created: {file_size} bytes")
-                return filename
-            else:
-                print("❌ File was not created")
-                return None
-                
-        except Exception as e:
-            print(f"❌ Recording failed: {e}")
-            try:
-                self.picam2.stop_recording()
-            except:
-                pass
-            return None
-    
-    def cleanup(self):
-        """Clean up camera"""
-        try:
-            if self.picam2:
-                self.picam2.stop()
-                self.picam2.close()
-            self.is_initialized = False
-            print("🧹 Camera cleaned up")
-        except Exception as e:
-            print(f"⚠️  Cleanup error: {e}")
-
-import time
-import threading
-from datetime import datetime
-from picamera2 import Picamera2
-from picamera2.encoders import H264Encoder
-
-class CameraManager:
-    """Minimal camera manager focused on video recording"""
-    
-    def __init__(self):
-        """Initialize minimal camera manager"""
-        self.picam2 = None
-        self.is_initialized = False
-        
-        # Minimal configs
-        self.high_res_config = {"format": "RGB888", "size": (1920, 1080)}
-        self.low_res_config = {"format": "RGB888", "size": (640, 480)}
-        self.video_format = "mp4"  # Force MP4 format
-        self.video_duration = 1
-        self.video_bitrate = 1000000
-
-    def setup(self):
-        """Initialize camera"""
-        try:
-            self.picam2 = Picamera2()
-            
-            # Simple photo config
-            self.photo_config = self.picam2.create_still_configuration(
-                main=self.high_res_config
-            )
-            
-            # Simple video config
-            self.video_config = self.picam2.create_video_configuration(
-                main=self.low_res_config
-            )
-            
-            # Start with photo config
-            self.picam2.configure(self.photo_config)
-            self.picam2.start()
-            time.sleep(2)  # Camera stabilization
-            
-            self.is_initialized = True
-            print("✅ Camera initialized successfully")
-            return True
-            
-        except Exception as e:
-            print(f"❌ Camera setup failed: {e}")
-            return False
-    
-    def record_video_simple(self, filename=None):
-        """Simple video recording with MP4 format"""
-        if not self.is_initialized:
-            print("❌ Camera not initialized")
-            return None
-            
-        try:
-            # Generate filename
-            if filename is None:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"captures/videos/test_video_{timestamp}.{self.video_format}"
-            
-            print(f"🔴 Recording {self.video_format.upper()} video: {filename}")
-            
-            # Switch to video mode
-            self.picam2.switch_mode(self.video_config)
-            time.sleep(1.0)  # Let camera adjust
-            print("✅ Video mode activated")
-            
-            # Simple H264 encoder
-            encoder = H264Encoder(bitrate=self.video_bitrate)
-            
-            # Start recording
-            self.picam2.start_recording(encoder, filename)
-            print(f"▶️  Recording started...")
-            
-            # Record for duration
-            time.sleep(self.video_duration)
-            
-            # Stop recording
-            self.picam2.stop_recording()
-            time.sleep(0.2)  # Let encoder finish
-            
-            print(f"⏹️  Recording complete: {filename}")
-            
-            # Verify file
-            import os
-            if os.path.exists(filename):
-                file_size = os.path.getsize(filename)
-                print(f"📊 File created: {file_size} bytes")
-                return filename
-            else:
-                print("❌ File was not created")
-                return None
-                
-        except Exception as e:
-            print(f"❌ Recording failed: {e}")
-            try:
-                self.picam2.stop_recording()
-            except:
-                pass
-            return None
-    
-    def cleanup(self):
-        """Clean up camera"""
-        try:
-            if self.picam2:
-                self.picam2.stop()
-                self.picam2.close()
-            self.is_initialized = False
-            print("🧹 Camera cleaned up")
-        except Exception as e:
-            print(f"⚠️  Cleanup error: {e}")
+        # Get configurations from settings
+        self.high_res_config = Settings.get_high_res_config()
+        self.low_res_config = Settings.get_low_res_config()
+        self.video_settings = Settings.get_video_settings()
+        self.file_paths = Settings.get_file_paths()
 
     def setup(self):
         """Initialize camera"""
@@ -267,25 +66,9 @@ class CameraManager:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 filename = f"{self.file_paths['snapshots']}snapshot_{timestamp}.jpg"
             
-            # Switch to photo configuration with better error handling
-            try:
-                self.picam2.switch_mode(self.photo_config)
-                time.sleep(1.0)  # Increased settling time for mode switch
-                print("Camera Thread: Photo mode activated")
-            except Exception as mode_error:
-                print(f"Camera Thread: Photo mode switch error: {mode_error}")
-                # Try to recover
-                try:
-                    self.picam2.stop()
-                    time.sleep(0.5)
-                    self.picam2.start()
-                    time.sleep(0.5)
-                    self.picam2.switch_mode(self.photo_config)
-                    time.sleep(1.0)
-                    print("Camera Thread: Photo mode recovered")
-                except Exception as recovery_error:
-                    print(f"Camera Thread: Photo mode recovery failed: {recovery_error}")
-                    raise
+            # Switch to photo configuration
+            self.picam2.switch_mode(self.photo_config)
+            time.sleep(0.5)  # Let camera adjust
             
             # Capture high-res photo
             self.picam2.capture_file(filename)
@@ -297,7 +80,7 @@ class CameraManager:
             return None
     
     def record_low_res_video(self, filename=None):
-        """Record low resolution video for specified duration with proper H.264 finalization"""
+        """Record low resolution video for specified duration"""
         if not self.is_initialized:
             print("Camera not initialized")
             return None
@@ -306,42 +89,14 @@ class CameraManager:
             # Generate filename if not provided
             if filename is None:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                video_format = self.video_settings["format"]
-                filename = f"{self.file_paths['videos']}video_{timestamp}.{video_format}"
+                filename = f"{self.file_paths['videos']}video_{timestamp}.{self.video_settings['format']}"
             
-            # Get video format for later use
-            video_format = self.video_settings["format"].lower()
+            # Switch to video configuration
+            self.picam2.switch_mode(self.video_config)
+            time.sleep(0.5)  # Let camera adjust
             
-            # Switch to video configuration with better error handling
-            try:
-                self.picam2.switch_mode(self.video_config)
-                time.sleep(1.0)  # Increased settling time for mode switch
-                print("Camera Thread: Video mode activated")
-            except Exception as mode_error:
-                print(f"Camera Thread: Mode switch error: {mode_error}")
-                # Try to recover by stopping and restarting
-                try:
-                    self.picam2.stop()
-                    time.sleep(0.5)
-                    self.picam2.start()
-                    time.sleep(0.5)
-                    self.picam2.switch_mode(self.video_config)
-                    time.sleep(1.0)
-                    print("Camera Thread: Video mode recovered")
-                except Exception as recovery_error:
-                    print(f"Camera Thread: Mode recovery failed: {recovery_error}")
-                    raise
-            
-            # Setup encoder with improved settings
-            encoder = H264Encoder(
-                bitrate=self.video_settings["bitrate"],
-                repeat=True,
-                iperiod=30
-            )
-            
-            # For MP4 format, the container will store proper metadata
-            if video_format == "mp4":
-                print("Camera Thread: Recording MP4 for better metadata compatibility")
+            # Setup encoder
+            encoder = H264Encoder(bitrate=self.video_settings["bitrate"])
             
             # Start recording
             self.picam2.start_recording(encoder, filename)
@@ -349,49 +104,14 @@ class CameraManager:
             
             # Record for specified duration
             time.sleep(self.video_settings["duration"])
-            
-            # Ensure proper stream finalization
-            try:
-                # Give encoder time to finalize current frame
-                time.sleep(0.1)
-                
-                # Stop recording gracefully
-                self.picam2.stop_recording()
-                
-                # Additional time for encoder to write final metadata
-                time.sleep(0.2)
-                
-            except Exception as stop_error:
-                print(f"Warning during recording stop: {stop_error}")
-                # Still try to clean up
-                try:
-                    self.picam2.stop_recording()
-                except:
-                    pass
-            
+
+            # Stop recording
+            self.picam2.stop_recording()
             print(f"Video recording complete: {filename}")
-            
-            # Verify the file was created and has reasonable size
-            import os
-            if os.path.exists(filename):
-                file_size = os.path.getsize(filename)
-                if file_size < 1000:  # Less than 1KB is suspicious
-                    print(f"⚠️  Warning: Video file suspiciously small ({file_size} bytes)")
-                else:
-                    print(f"✅ Video file created successfully ({file_size} bytes)")
-            else:
-                print(f"❌ Video file was not created: {filename}")
-                return None
-                
             return filename
             
         except Exception as e:
             print(f"Video recording failed: {e}")
-            # Ensure recording is stopped even on error
-            try:
-                self.picam2.stop_recording()
-            except:
-                pass
             return None
     
     def motion_triggered_capture(self):
@@ -404,19 +124,11 @@ class CameraManager:
         print("Camera Thread: Motion triggered! Starting dual capture...")
         
         try:
-            # Strategy: Record video FIRST, then capture snapshot
-            # This avoids the problematic photo->video mode switch that can corrupt H.264
-            
-            # Record low-res video FIRST
-            print("Camera Thread: Recording video first to avoid mode switching issues...")
-            video_file = self.record_low_res_video()
-            
-            # Give camera time to fully complete video recording and reset
-            time.sleep(0.5)
-            
-            # Capture high-res snapshot AFTER video
-            print("Camera Thread: Now capturing snapshot...")
+            # Capture high-res snapshot first (quick)
             snapshot_file = self.capture_high_res_snapshot()
+            
+            # Record low-res video
+            video_file = self.record_low_res_video()
             
             capture_info = {
                 'timestamp': datetime.now().isoformat(),
@@ -427,8 +139,8 @@ class CameraManager:
             
             if capture_info['success']:
                 print("Motion capture complete!")
-                print(f"   Video: {video_file}")
                 print(f"   Snapshot: {snapshot_file}")
+                print(f"   Video: {video_file}")
                 
                 # Trigger callback for motion event processing
                 if self.motion_callback:
