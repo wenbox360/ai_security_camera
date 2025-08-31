@@ -20,7 +20,7 @@ CAMERA_LOW_RES_FORMAT = "RGB888"
 # Video Settings
 VIDEO_DURATION = 1  # seconds - reduced from 2 to minimize processing time
 VIDEO_BITRATE = 800000  # 800kbps - reduced bitrate for faster processing
-VIDEO_FORMAT = "h264"
+VIDEO_FORMAT = "h264"  # Keep as h264 but with improved encoding
 
 # File Settings
 CAPTURES_DIR = "captures/"
