@@ -66,9 +66,25 @@ class CameraManager:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 filename = f"{self.file_paths['snapshots']}snapshot_{timestamp}.jpg"
             
-            # Switch to photo configuration
-            self.picam2.switch_mode(self.photo_config)
-            time.sleep(0.5)  # Let camera adjust
+            # Switch to photo configuration with better error handling
+            try:
+                self.picam2.switch_mode(self.photo_config)
+                time.sleep(1.0)  # Increased settling time for mode switch
+                print("Camera Thread: Photo mode activated")
+            except Exception as mode_error:
+                print(f"Camera Thread: Photo mode switch error: {mode_error}")
+                # Try to recover
+                try:
+                    self.picam2.stop()
+                    time.sleep(0.5)
+                    self.picam2.start()
+                    time.sleep(0.5)
+                    self.picam2.switch_mode(self.photo_config)
+                    time.sleep(1.0)
+                    print("Camera Thread: Photo mode recovered")
+                except Exception as recovery_error:
+                    print(f"Camera Thread: Photo mode recovery failed: {recovery_error}")
+                    raise
             
             # Capture high-res photo
             self.picam2.capture_file(filename)
@@ -91,9 +107,25 @@ class CameraManager:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 filename = f"{self.file_paths['videos']}video_{timestamp}.{self.video_settings['format']}"
             
-            # Switch to video configuration
-            self.picam2.switch_mode(self.video_config)
-            time.sleep(0.5)  # Let camera adjust
+            # Switch to video configuration with better error handling
+            try:
+                self.picam2.switch_mode(self.video_config)
+                time.sleep(1.0)  # Increased settling time for mode switch
+                print("Camera Thread: Video mode activated")
+            except Exception as mode_error:
+                print(f"Camera Thread: Mode switch error: {mode_error}")
+                # Try to recover by stopping and restarting
+                try:
+                    self.picam2.stop()
+                    time.sleep(0.5)
+                    self.picam2.start()
+                    time.sleep(0.5)
+                    self.picam2.switch_mode(self.video_config)
+                    time.sleep(1.0)
+                    print("Camera Thread: Video mode recovered")
+                except Exception as recovery_error:
+                    print(f"Camera Thread: Mode recovery failed: {recovery_error}")
+                    raise
             
             # Setup encoder with improved settings for metadata integrity
             encoder = H264Encoder(
@@ -163,11 +195,19 @@ class CameraManager:
         print("Camera Thread: Motion triggered! Starting dual capture...")
         
         try:
-            # Capture high-res snapshot first (quick)
-            snapshot_file = self.capture_high_res_snapshot()
+            # Strategy: Record video FIRST, then capture snapshot
+            # This avoids the problematic photo->video mode switch that can corrupt H.264
             
-            # Record low-res video
+            # Record low-res video FIRST
+            print("Camera Thread: Recording video first to avoid mode switching issues...")
             video_file = self.record_low_res_video()
+            
+            # Give camera time to fully complete video recording and reset
+            time.sleep(0.5)
+            
+            # Capture high-res snapshot AFTER video
+            print("Camera Thread: Now capturing snapshot...")
+            snapshot_file = self.capture_high_res_snapshot()
             
             capture_info = {
                 'timestamp': datetime.now().isoformat(),
@@ -178,8 +218,8 @@ class CameraManager:
             
             if capture_info['success']:
                 print("Motion capture complete!")
-                print(f"   Snapshot: {snapshot_file}")
                 print(f"   Video: {video_file}")
+                print(f"   Snapshot: {snapshot_file}")
                 
                 # Trigger callback for motion event processing
                 if self.motion_callback:
