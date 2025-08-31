@@ -108,6 +108,9 @@ class CameraManager:
                 video_format = self.video_settings["format"]
                 filename = f"{self.file_paths['videos']}video_{timestamp}.{video_format}"
             
+            # Get video format for later use
+            video_format = self.video_settings["format"].lower()
+            
             # Switch to video configuration with better error handling
             try:
                 self.picam2.switch_mode(self.video_config)
