@@ -7,6 +7,7 @@ import os
 import sys
 import time
 import signal
+import cv2
 from datetime import datetime
 
 # Add the current directory to Python path
@@ -179,17 +180,31 @@ class SecurityCameraSystem:
             # Get snapshot for face recognition
             snapshot_file = capture_result.get('snapshot')
             if snapshot_file:
-                face_analysis = self.face_recognition.analyze_frame_for_threats(snapshot_file)
+                # Load the image file as numpy array for face recognition
+                try:
+                    snapshot_frame = cv2.imread(snapshot_file)
+                    if snapshot_frame is not None:
+                        # Convert BGR to RGB for face_recognition library
+                        snapshot_frame = cv2.cvtColor(snapshot_frame, cv2.COLOR_BGR2RGB)
+                        face_analysis = self.face_recognition.analyze_frame_for_threats(snapshot_frame)
+                    else:
+                        print(f"❌ Could not load snapshot file: {snapshot_file}")
+                        face_analysis = {'threat_detected': False, 'total_faces': 0, 'message': 'Could not load snapshot'}
+                except Exception as e:
+                    print(f"❌ Error loading snapshot for face recognition: {e}")
+                    face_analysis = {'threat_detected': False, 'total_faces': 0, 'message': f'Error loading snapshot: {e}'}
                 
                 # Parse face recognition results
-                if face_analysis.get('faces_detected', 0) > 0:
-                    known_people = face_analysis.get('recognized_faces', [])
-                    unknown_people = face_analysis.get('unknown_faces', 0)
+                if face_analysis.get('total_faces', 0) > 0:
+                    known_count = face_analysis.get('known_faces', 0)
+                    unknown_count = face_analysis.get('unknown_faces', 0)
+                    faces_list = face_analysis.get('faces', [])
                     
                     print(f"👥 Face Recognition Results:")
-                    print(f"   - Faces detected: {face_analysis.get('faces_detected', 0)}")
-                    print(f"   - Known people: {len(known_people)}")
-                    print(f"   - Unknown people: {unknown_people}")
+                    print(f"   - Total faces: {face_analysis.get('total_faces', 0)}")
+                    print(f"   - Known people: {known_count}")
+                    print(f"   - Unknown people: {unknown_count}")
+                    print(f"   - Message: {face_analysis.get('message', 'N/A')}")
                 else:
                     print("👤 No faces detected in frame")
             else:
