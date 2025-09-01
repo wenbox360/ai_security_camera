@@ -18,7 +18,7 @@ CAMERA_LOW_RES_HEIGHT = 480
 CAMERA_LOW_RES_FORMAT = "RGB888"
 
 # Video Settings
-VIDEO_DURATION = 1  # seconds - reduced from 2 to minimize processing time
+VIDEO_DURATION = 2  # seconds - reduced from 2 to minimize processing time
 VIDEO_BITRATE = 800000  # 800kbps - reduced bitrate for faster processing
 VIDEO_FORMAT = "mp4"  # Use MP4 container for proper metadata storage
 
