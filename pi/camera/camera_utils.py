@@ -7,7 +7,7 @@ import threading
 import numpy as np
 from datetime import datetime
 from picamera2 import Picamera2
-from picamera2.encoders import H264Encoder
+from picamera2.encoders import H264Encoder, MJPEGEncoder
 from config.settings import Settings
 
 class CameraManager:
@@ -95,19 +95,49 @@ class CameraManager:
             self.picam2.switch_mode(self.video_config)
             time.sleep(0.5)  # Let camera adjust
             
-            # Setup encoder
+            # Setup encoder - H.264 with proper MP4 container
             encoder = H264Encoder(bitrate=self.video_settings["bitrate"])
             
+            # For MP4 format, we need to save as .h264 first and then convert
+            temp_filename = filename
+            if self.video_settings['format'].lower() == 'mp4':
+                temp_filename = filename.replace('.mp4', '.h264')
+            
             # Start recording
-            self.picam2.start_recording(encoder, filename)
-            print(f"Started recording video: {filename}")
+            self.picam2.start_recording(encoder, temp_filename)
+            print(f"Started recording video: {temp_filename}")
             
             # Record for specified duration
             time.sleep(self.video_settings["duration"])
 
             # Stop recording
             self.picam2.stop_recording()
-            print(f"Video recording complete: {filename}")
+            print(f"Video recording complete: {temp_filename}")
+            
+            # Convert H.264 to MP4 if needed
+            if self.video_settings['format'].lower() == 'mp4' and temp_filename != filename:
+                try:
+                    import subprocess
+                    import os
+                    
+                    # Use ffmpeg to convert H.264 to MP4
+                    result = subprocess.run([
+                        'ffmpeg', '-i', temp_filename, '-c', 'copy', '-f', 'mp4', filename
+                    ], capture_output=True, text=True, timeout=30)
+                    
+                    if result.returncode == 0:
+                        os.remove(temp_filename)  # Remove temporary H.264 file
+                        print(f"Converted to MP4: {filename}")
+                    else:
+                        print(f"FFmpeg conversion failed: {result.stderr}")
+                        # Keep the H.264 file and update filename
+                        filename = temp_filename
+                        
+                except Exception as e:
+                    print(f"Error converting to MP4: {e}")
+                    # Keep the H.264 file
+                    filename = temp_filename
+            
             return filename
             
         except Exception as e:
