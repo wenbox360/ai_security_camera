@@ -1,0 +1,2 @@
+{"timestamp": "2025-08-16T21:37:16.308677", "event_type": "test_event", "severity": "INFO", "details": {"message": "System test"}}
+{"timestamp": "2025-08-16T21:59:28.837417", "event_type": "test_event", "severity": "INFO", "details": {"message": "System test"}}
