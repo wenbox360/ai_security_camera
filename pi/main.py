@@ -21,6 +21,7 @@ from vision.face_recognition import FaceRecognitionHandler
 from inference.behavior_analyzer import BehaviorAnalyzer
 from utils.security_logger import SecurityLogger
 from utils.config_queue import ConfigurationQueue
+from utils.cloud_communicator import CloudCommunicator, CloudConfigurationManager
 from config.settings import Settings
 
 class SecurityCameraSystem:
@@ -38,6 +39,10 @@ class SecurityCameraSystem:
         self.behavior_analyzer = None
         self.security_logger = None
         self.config_queue = None
+        
+        # Cloud communication components
+        self.cloud_communicator = None
+        self.cloud_config_manager = None
         
         # System state
         self.is_running = False
@@ -86,6 +91,35 @@ class SecurityCameraSystem:
             print("📋 Initializing configuration queue...")
             self.config_queue = ConfigurationQueue(security_system=self)
             
+            # Initialize cloud communication
+            print("🌐 Initializing cloud communication...")
+            cloud_config = Settings.get_cloud_config()
+            
+            if cloud_config['api_key']:  # Only initialize if API key is provided
+                self.cloud_communicator = CloudCommunicator(
+                    cloud_url=cloud_config['api_url'],
+                    device_id=cloud_config['device_id'], 
+                    api_key=cloud_config['api_key']
+                )
+                
+                # Test cloud connection
+                if self.cloud_communicator.test_connection():
+                    self.cloud_communicator.start()
+                    
+                    # Initialize cloud configuration manager
+                    self.cloud_config_manager = CloudConfigurationManager(
+                        self.cloud_communicator, 
+                        self.config_queue
+                    )
+                    self.cloud_config_manager.start()
+                    
+                    print("✅ Cloud communication enabled")
+                else:
+                    print("⚠️  Cloud connection failed - running in offline mode")
+                    self.cloud_communicator = None
+            else:
+                print("ℹ️  No cloud API key provided - running in offline mode")
+            
             self.system_ready = True
             print("✅ Security system initialization complete!")
             return True
@@ -121,6 +155,7 @@ class SecurityCameraSystem:
         print(f"   - YOLO Model: ✅ Loaded ({Settings.get_yolo_model()})")
         print(f"   - Face Recognition: ✅ Ready")
         print(f"   - Config Queue: ✅ Active")
+        print(f"   - Cloud Communication: {'✅ Connected' if self.cloud_communicator else '❌ Offline'}")
         print("Press Ctrl+C to stop monitoring...\n")
         
         self.is_running = True
@@ -211,9 +246,9 @@ class SecurityCameraSystem:
                 print("⚠️  No snapshot available for face recognition")
         
         # Step 3: Determine alert level and log event
-        self._evaluate_security_event(dwelling_analysis, known_people, unknown_people, face_analysis)
+        self._evaluate_security_event(dwelling_analysis, known_people, unknown_people, face_analysis, capture_result)
     
-    def _evaluate_security_event(self, dwelling_analysis, known_people, unknown_people, face_analysis):
+    def _evaluate_security_event(self, dwelling_analysis, known_people, unknown_people, face_analysis, capture_result):
         """Evaluate security event and determine appropriate response"""
         
         # Ensure known_people and unknown_people are properly handled
@@ -230,7 +265,7 @@ class SecurityCameraSystem:
             unknown_people_count = unknown_people if unknown_people else 0
         
         try:
-            # Log the event
+            # Log the event locally
             log_entry = self.security_logger.log_dwelling_event(
                 dwelling_analysis, known_people_count, unknown_people_count
             )
@@ -239,18 +274,27 @@ class SecurityCameraSystem:
             if face_analysis:
                 self.security_logger.log_face_recognition_event(face_analysis)
         except Exception as e:
-            print(f"Motion callback error: {e}")
-            return
+            print(f"Local logging error: {e}")
         
         # Determine response based on analysis
         dwelling_detected = dwelling_analysis.get('dwelling_detected', False)
         has_unknown_people = unknown_people_count > 0
+        
+        # Determine if we should send to cloud (cost-conscious decision)
+        should_send_to_cloud = False
+        event_type = "motion_detected"
+        priority = False
         
         if dwelling_detected and has_unknown_people:
             print("🚨 SECURITY ALERT: Unknown person dwelling detected!")
             print(f"   Duration: {dwelling_analysis.get('longest_continuous_presence', 0):.1f}s")
             print(f"   Confidence: {dwelling_analysis.get('confidence', 0):.2f}")
             print(f"   Unknown people: {unknown_people_count}")
+            
+            # HIGH PRIORITY: Send to cloud for LLM analysis
+            should_send_to_cloud = True
+            event_type = "dwelling_alert_unknown"
+            priority = True
             
         elif dwelling_detected and known_people_count > 0:
             print("⚠️  Known person dwelling detected")
@@ -259,8 +303,20 @@ class SecurityCameraSystem:
                 names = [p.get('name', 'Unknown') for p in known_people_list]
                 print(f"   Known people: {', '.join(names)}")
             
+            # MEDIUM PRIORITY: Send to cloud for analysis (might be suspicious)
+            dwelling_duration = dwelling_analysis.get('longest_continuous_presence', 0)
+            if dwelling_duration > 60:  # Only if dwelling > 1 minute
+                should_send_to_cloud = True
+                event_type = "dwelling_known_person"
+                priority = False
+            
         elif has_unknown_people:
             print("👁️  Unknown person detected (brief presence)")
+            
+            # SEND TO CLOUD: Unknown person always needs analysis
+            should_send_to_cloud = True
+            event_type = "unknown_person_detected"
+            priority = False
             
         elif known_people_count > 0:
             print("✅ Known person detected")
@@ -268,8 +324,72 @@ class SecurityCameraSystem:
                 names = [p.get('name', 'Unknown') for p in known_people_list]
                 print(f"   People: {', '.join(names)}")
             
+            # NO CLOUD: Known person, brief presence - save costs
+            should_send_to_cloud = False
+            
         else:
             print("ℹ️  Motion detected - person analysis inconclusive")
+            
+            # NO CLOUD: Inconclusive motion - save costs
+            should_send_to_cloud = False
+        
+        # Send to cloud if warranted
+        if should_send_to_cloud and self.cloud_communicator:
+            self._send_event_to_cloud(
+                event_type=event_type,
+                dwelling_analysis=dwelling_analysis,
+                face_analysis=face_analysis,
+                capture_result=capture_result,
+                priority=priority
+            )
+        elif should_send_to_cloud:
+            print("⚠️  Would send to cloud but no connection available")
+    
+    def _send_event_to_cloud(self, event_type: str, dwelling_analysis: dict, face_analysis: dict, capture_result: dict, priority: bool = False):
+        """Send event to cloud for LLM analysis"""
+        try:
+            # Prepare detected objects from dwelling analysis
+            detected_objects = []
+            if dwelling_analysis.get('total_detections', 0) > 0:
+                detected_objects.append({
+                    'class': 'person',
+                    'confidence': dwelling_analysis.get('confidence', 0.0),
+                    'count': dwelling_analysis.get('total_detections', 0)
+                })
+            
+            # Calculate overall confidence score
+            confidence_score = dwelling_analysis.get('confidence', 0.0)
+            if face_analysis and face_analysis.get('total_faces', 0) > 0:
+                confidence_score = max(confidence_score, 0.8)  # High confidence if faces detected
+            
+            # Get file paths
+            snapshot_path = capture_result.get('snapshot')
+            video_path = capture_result.get('video')
+            
+            if not snapshot_path:
+                print("❌ No snapshot available for cloud upload")
+                return
+            
+            print(f"📤 Sending {event_type} to cloud (priority: {priority})...")
+            
+            success = self.cloud_communicator.send_security_event(
+                event_type=event_type,
+                confidence_score=confidence_score,
+                detected_objects=detected_objects,
+                face_analysis=face_analysis or {},
+                dwelling_analysis=dwelling_analysis,
+                snapshot_path=snapshot_path,
+                video_path=video_path,
+                priority=priority
+            )
+            
+            if success:
+                print("✅ Event queued for cloud analysis")
+            else:
+                print("❌ Failed to queue event for cloud")
+                
+        except Exception as e:
+            print(f"❌ Error sending event to cloud: {e}")
     
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals"""
@@ -292,6 +412,14 @@ class SecurityCameraSystem:
             if self.config_queue:
                 print("📋 Stopping configuration queue...")
                 self.config_queue.cleanup()
+            
+            if self.cloud_config_manager:
+                print("⚙️  Stopping cloud configuration manager...")
+                self.cloud_config_manager.stop()
+            
+            if self.cloud_communicator:
+                print("🌐 Stopping cloud communication...")
+                self.cloud_communicator.stop()
             
             print("✅ Security system shutdown complete")
             
