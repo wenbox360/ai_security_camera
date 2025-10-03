@@ -114,6 +114,16 @@ class ProcessingTask(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True))
 
-# Create all tables
-def create_tables():
+# Initialize database - create all tables and setup
+def initialize_database():
+    """
+    Initialize the database by creating all tables and setting up the schema.
+    This function sets up the complete database structure for the security camera system.
+    """
     Base.metadata.create_all(bind=engine)
+
+# Backwards compatibility alias
+def create_tables():
+    """Deprecated: Use initialize_database() instead"""
+    print("⚠️  Warning: create_tables() is deprecated, use initialize_database() instead")
+    initialize_database()

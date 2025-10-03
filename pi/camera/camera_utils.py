@@ -178,6 +178,7 @@ class CameraManager:
                         self.motion_callback(capture_info)
                     except Exception as e:
                         print(f"Motion callback error: {e}")
+                        return capture_info
             else:
                 print("Motion capture partially failed")
                 

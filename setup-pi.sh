@@ -9,15 +9,17 @@ echo "🔧 AI Security Camera - Pi Configuration"
 echo "========================================"
 
 # Check if cloud config exists
-if [ ! -f "cloud/aws-config.json" ]; then
-    echo "❌ Cloud configuration not found!"
+CLOUD_CONFIG_PATH="cloud/aws-config.json"
+if [ ! -f "$CLOUD_CONFIG_PATH" ]; then
+    echo "❌ Cloud configuration not found at: $CLOUD_CONFIG_PATH"
     echo "Please deploy the cloud infrastructure first with:"
     echo "  cd cloud && ./setup-aws-infrastructure.sh"
+    echo "Current directory: $(pwd)"
     exit 1
 fi
 
 # Load cloud configuration
-CLOUD_API_URL="http://$(jq -r '.alb_dns' cloud/aws-config.json)"
+CLOUD_API_URL="http://$(jq -r '.alb_dns' "$CLOUD_CONFIG_PATH")"
 
 echo "📋 Cloud Configuration:"
 echo "  API URL: $CLOUD_API_URL"
