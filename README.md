@@ -2,7 +2,9 @@
 
 A complete cloud-based AI security camera system with Raspberry Pi edge devices, featuring face recognition, behavior analysis, and intelligent cloud processing.
 
-## 🏗️ Architecture
+![alt text](/images/image.png)
+
+## Architecture
 
 ```
 Pi Device → Cloud API → LLM Analysis → Mobile Notifications
@@ -35,7 +37,7 @@ Pi Device → Cloud API → LLM Analysis → Mobile Notifications
 - Device management
 - Settings configuration
 
-## 🚀 Quick Deployment
+## Quick Deployment
 
 ### Prerequisites
 
@@ -117,7 +119,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-## 📱 System Flow
+## System Flow
 
 ### Settings Configuration
 1. **Mobile App** → Updates device settings via cloud API
@@ -137,7 +139,7 @@ python main.py
 7. **LLM Analysis** → GPT-4 analyzes context and determines alert necessity
 8. **Mobile Notification** → Sends push notification if alert warranted
 
-## 🔧 Configuration
+## Configuration
 
 ### Pi Configuration
 
@@ -155,7 +157,7 @@ Environment variables (set in ECS):
 - `OPENAI_API_KEY` - OpenAI API key
 - `JWT_SECRET_KEY` - JWT signing key
 
-## 📊 Monitoring
+## Monitoring
 
 ### View Logs
 
@@ -183,7 +185,7 @@ python manage.py list-users
 python manage.py list-devices
 ```
 
-## 🔒 Security Features
+## Security Features
 
 ### Authentication
 - **Mobile Apps**: JWT tokens with refresh mechanism
@@ -200,7 +202,7 @@ python manage.py list-devices
 - **Local Processing**: YOLO and face recognition run on Pi
 - **Efficient Storage**: S3 lifecycle policies for automatic cleanup
 
-## 🛠️ Development
+## Development
 
 ### Local Testing
 
@@ -231,7 +233,7 @@ python test/pir_test.py
 python test_system.py
 ```
 
-## 📦 Dependencies
+## Dependencies
 
 ### Pi Requirements
 - OpenCV
@@ -248,7 +250,7 @@ python test_system.py
 - OpenAI
 - boto3 (AWS SDK)
 
-## 🎯 Key Features
+## Key Features
 
 ### Smart Event Detection
 - Motion-triggered recording
@@ -274,7 +276,7 @@ python test_system.py
 - Real-time event streaming
 - Device management endpoints
 
-## 🚨 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
@@ -306,6 +308,5 @@ For issues or questions:
 3. Test individual components
 4. Check AWS service status if cloud issues
 
----
 
-🎉 **Your AI security camera system is now ready!** The Pi will intelligently detect and analyze security events, while the cloud provides powerful AI analysis and mobile notifications.
+**Your AI security camera system is now ready!**
