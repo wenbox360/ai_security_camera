@@ -214,7 +214,22 @@ aws rds create-db-subnet-group \
 
 # Create RDS Instance
 echo "🗄️  Creating RDS MySQL database..."
+# Generate a strong password for the RDS instance
 DB_PASSWORD=$(openssl rand -base64 32)
+
+# Store the database password securely in AWS Secrets Manager
+SECRET_NAME="${PROJECT_NAME}-db-password"
+echo "🔒 Storing database password securely in AWS Secrets Manager..."
+aws secretsmanager create-secret \
+    --name "$SECRET_NAME" \
+    --description "RDS master password for $PROJECT_NAME" \
+    --secret-string "$DB_PASSWORD" \
+    --region $AWS_REGION
+
+echo "🔒 Database password stored securely in AWS Secrets Manager as secret: $SECRET_NAME"
+echo "⚠️  WARNING: Database credentials are also saved in aws-config.json for initial setup convenience."
+echo "⚠️  SECURITY RECOMMENDATION: Retrieve passwords from AWS Secrets Manager in production and delete from config files."
+
 aws rds create-db-instance \
     --db-instance-identifier ${PROJECT_NAME}-db \
     --db-instance-class db.t3.micro \
@@ -329,7 +344,10 @@ cat > aws-config.json << EOF
     "alb_arn": "$ALB_ARN",
     "alb_dns": "$ALB_DNS",
     "target_group_arn": "$TG_ARN",
-    "db_password": "$DB_PASSWORD"
+    "db_password": "$DB_PASSWORD",
+    "secrets": {
+        "db_password_secret": "$SECRET_NAME"
+    }
 }
 EOF
 
@@ -346,7 +364,8 @@ echo "  🐳 ECS Cluster: ${PROJECT_NAME}-cluster"
 echo "  ⚖️  Load Balancer: $ALB_DNS"
 echo ""
 echo "📝 Configuration saved to: aws-config.json"
-echo "🔑 Database password saved in aws-config.json"
+echo "🔑 Database password saved in AWS Secrets Manager: $SECRET_NAME"
+echo "⚠️  Database password also temporarily saved in aws-config.json for convenience"
 echo ""
 echo "⏳ Note: RDS and ElastiCache are still being created (5-10 minutes)"
 echo ""

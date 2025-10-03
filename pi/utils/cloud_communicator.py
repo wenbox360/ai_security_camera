@@ -28,6 +28,31 @@ class CloudCommunicator:
         self.cloud_url = cloud_url.rstrip('/')
         self.device_id = device_id
         self.api_key = api_key
+    
+    @classmethod
+    def from_config(cls, config):
+        """
+        Alternative constructor to create CloudCommunicator from a config dict or tuple.
+        
+        Args:
+            config: A dict with keys 'api_url', 'device_id', 'api_key', or a tuple/list of three values in order.
+            
+        Returns:
+            CloudCommunicator: New instance configured from the provided config
+        """
+        if isinstance(config, dict):
+            cloud_url = config.get('api_url')
+            device_id = config.get('device_id')
+            api_key = config.get('api_key')
+        elif isinstance(config, (list, tuple)) and len(config) == 3:
+            cloud_url, device_id, api_key = config
+        else:
+            raise ValueError("Config must be a dict with keys 'api_url', 'device_id', 'api_key', or a tuple/list of three values.")
+        
+        if not cloud_url or not device_id:
+            raise ValueError("cloud_url and device_id are required")
+        
+        return cls(cloud_url, device_id, api_key)
         
         # Request configuration
         self.timeout = 30  # seconds
@@ -272,13 +297,13 @@ class CloudCommunicator:
             if hasattr(file_obj, 'close'):
                 try:
                     file_obj.close()
-                except:
-                    pass
+                except Exception as e:
+                    print(f"❌ Error closing file object: {e}")
             elif isinstance(file_obj, tuple) and len(file_obj) > 1:
                 try:
                     file_obj[1].close()  # Close the file handle in tuple
-                except:
-                    pass
+                except Exception as e:
+                    print(f"❌ Error closing file object in tuple: {e}")
     
     def get_stats(self) -> Dict:
         """Get communication statistics"""
