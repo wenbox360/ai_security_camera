@@ -40,6 +40,12 @@ DWELLING_THRESHOLD = 30  # seconds - minimum time to consider dwelling
 VIDEO_FRAME_SKIP = 3  # analyze every nth frame for efficiency
 MIN_PERSON_CONFIDENCE = 0.5  # minimum YOLO confidence for person detection
 
+# Cloud Communication Settings
+CLOUD_API_URL = "http://localhost:8000"  # Cloud API base URL
+DEVICE_ID = "pi_device_001"  # Unique device identifier
+DEVICE_API_KEY = ""  # API key for cloud authentication (set via environment or config file)
+CLOUD_SYNC_INTERVAL = 300  # seconds - how often to sync settings from cloud
+
 class Settings:
     """Settings configuration class"""
     
@@ -110,3 +116,13 @@ class Settings:
     def get_min_person_confidence():
         """Get minimum confidence for person detection"""
         return MIN_PERSON_CONFIDENCE
+    
+    @staticmethod
+    def get_cloud_config():
+        """Get cloud communication configuration"""
+        return {
+            "api_url": CLOUD_API_URL,
+            "device_id": DEVICE_ID,
+            "api_key": DEVICE_API_KEY,
+            "sync_interval": CLOUD_SYNC_INTERVAL
+        }
