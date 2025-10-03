@@ -96,11 +96,7 @@ class SecurityCameraSystem:
             cloud_config = Settings.get_cloud_config()
             
             if cloud_config['api_key']:  # Only initialize if API key is provided
-                self.cloud_communicator = CloudCommunicator(
-                    cloud_url=cloud_config['api_url'],
-                    device_id=cloud_config['device_id'], 
-                    api_key=cloud_config['api_key']
-                )
+                self.cloud_communicator = CloudCommunicator.from_config(cloud_config)
                 
                 # Test cloud connection
                 if self.cloud_communicator.test_connection():
@@ -275,6 +271,7 @@ class SecurityCameraSystem:
                 self.security_logger.log_face_recognition_event(face_analysis)
         except Exception as e:
             print(f"Local logging error: {e}")
+            return
         
         # Determine response based on analysis
         dwelling_detected = dwelling_analysis.get('dwelling_detected', False)
