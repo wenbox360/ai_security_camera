@@ -1,202 +1,144 @@
 #!/usr/bin/env python3
-"""
-Management script for AI Security Camera Cloud
-"""
+"""Small, import-safe management CLI for the cloud service."""
 
-import sys
-import os
 import argparse
+import getpass
 import secrets
-from datetime import datetime
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-# Add current directory to path for imports
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from .auth import get_device_api_key_hash, get_password_hash
+from .database import Base, Device, SessionLocal, User, engine
 
-from database import User, Device, Base, get_db_url
 
 def get_session():
-    """Get database session"""
-    engine = create_engine(get_db_url())
-    Session = sessionmaker(bind=engine)
-    return Session()
+    return SessionLocal()
 
-def create_user(username: str, email: str):
-    """Create a new user"""
-    print(f"Creating user: {username} ({email})")
-    
+
+def create_user(username: str, email: str, password: str) -> bool:
     session = get_session()
-    
     try:
-        # Check if user exists
-        existing_user = session.query(User).filter(
-            (User.username == username) | (User.email == email)
-        ).first()
-        
-        if existing_user:
-            print(f"❌ User with username '{username}' or email '{email}' already exists")
+        if (
+            session.query(User)
+            .filter((User.username == username) | (User.email == email))
+            .first()
+        ):
+            print("User with that username or email already exists")
             return False
-        
-        # Create user
-        user = User(
-            username=username,
-            email=email,
-            is_active=True,
-            created_at=datetime.utcnow()
+        session.add(
+            User(
+                username=username,
+                email=email,
+                hashed_password=get_password_hash(password),
+                is_active=True,
+            )
         )
-        
-        session.add(user)
         session.commit()
-        
-        print(f"✅ User created successfully with ID: {user.id}")
+        print(f"Created user {username}")
         return True
-        
-    except Exception as e:
+    except Exception as exc:
         session.rollback()
-        print(f"❌ Error creating user: {e}")
+        print(f"Unable to create user: {exc}")
         return False
     finally:
         session.close()
 
-def create_device(user_id: int, device_name: str):
-    """Create a new Pi device for a user"""
-    print(f"Creating device '{device_name}' for user ID {user_id}")
-    
+
+def create_device(user_id: int, name: str, device_id: str | None = None) -> bool:
+    """Create a device and print its plaintext key exactly once."""
     session = get_session()
-    
     try:
-        # Check if user exists
-        user = session.query(User).filter(User.id == user_id).first()
-        if not user:
-            print(f"❌ User with ID {user_id} not found")
+        if session.get(User, user_id) is None:
+            print(f"User {user_id} was not found")
             return False
-        
-        # Generate API key
+        device_id = device_id or f"device-{secrets.token_hex(8)}"
+        if session.query(Device).filter(Device.device_id == device_id).first():
+            print(f"Device ID {device_id} already exists")
+            return False
         api_key = secrets.token_urlsafe(32)
-        
-        # Create device
-        device = Device(
-            user_id=user_id,
-            device_name=device_name,
-            api_key=api_key,
-            is_active=True,
-            created_at=datetime.utcnow()
+        session.add(
+            Device(
+                device_id=device_id,
+                name=name,
+                owner_id=user_id,
+                api_key_hash=get_device_api_key_hash(api_key),
+                is_active=True,
+            )
         )
-        
-        session.add(device)
         session.commit()
-        
-        print(f"✅ Device created successfully!")
-        print(f"   Device ID: {device.id}")
-        print(f"   Device Name: {device_name}")
-        print(f"   API Key: {api_key}")
-        print("")
-        print("⚠️  IMPORTANT: Save this API key! You'll need it to configure your Pi device.")
-        
+        print(
+            f"Created device {device_id}. Save this API key now; it cannot be recovered:\n{api_key}"
+        )
         return True
-        
-    except Exception as e:
+    except Exception as exc:
         session.rollback()
-        print(f"❌ Error creating device: {e}")
+        print(f"Unable to create device: {exc}")
         return False
     finally:
         session.close()
+
 
 def list_users():
-    """List all users"""
-    print("📋 Users:")
-    
     session = get_session()
-    
     try:
-        users = session.query(User).all()
-        
-        if not users:
-            print("  No users found")
-            return
-        
-        for user in users:
-            status = "✅ Active" if user.is_active else "❌ Inactive"
-            print(f"  ID: {user.id} | {user.username} ({user.email}) | {status}")
-        
-    except Exception as e:
-        print(f"❌ Error listing users: {e}")
+        for user in session.query(User).order_by(User.id):
+            print(
+                f"{user.id}\t{user.username}\t{user.email}\t{'active' if user.is_active else 'inactive'}"
+            )
     finally:
         session.close()
+
 
 def list_devices():
-    """List all devices"""
-    print("📋 Devices:")
-    
     session = get_session()
-    
     try:
-        devices = session.query(Device).join(User).all()
-        
-        if not devices:
-            print("  No devices found")
-            return
-        
-        for device in devices:
-            status = "✅ Active" if device.is_active else "❌ Inactive"
-            print(f"  ID: {device.id} | {device.device_name} | User: {device.user.username} | {status}")
-        
-    except Exception as e:
-        print(f"❌ Error listing devices: {e}")
+        for device in session.query(Device).order_by(Device.id):
+            print(
+                f"{device.id}\t{device.device_id}\t{device.name}\towner={device.owner_id}\t{'active' if device.is_active else 'inactive'}"
+            )
     finally:
         session.close()
 
-def init_db():
-    """Initialize database tables"""
-    print("Creating database tables...")
-    
+
+def init_db() -> bool:
     try:
-        engine = create_engine(get_db_url())
         Base.metadata.create_all(bind=engine)
-        print("✅ Database initialized successfully!")
+        print("Database initialized")
         return True
-    except Exception as e:
-        print(f"❌ Error initializing database: {e}")
+    except Exception as exc:
+        print(f"Unable to initialize database: {exc}")
         return False
 
-def main():
+
+def main() -> int:
     parser = argparse.ArgumentParser(description="AI Security Camera Cloud Management")
-    subparsers = parser.add_subparsers(dest='command', help='Available commands')
-    
-    # Init database
-    subparsers.add_parser('init-db', help='Initialize database tables')
-    
-    # User management
-    user_parser = subparsers.add_parser('create-user', help='Create a new user')
-    user_parser.add_argument('username', help='Username')
-    user_parser.add_argument('email', help='Email address')
-    
-    subparsers.add_parser('list-users', help='List all users')
-    
-    # Device management
-    device_parser = subparsers.add_parser('create-device', help='Create a new Pi device')
-    device_parser.add_argument('user_id', type=int, help='User ID who owns the device')
-    device_parser.add_argument('device_name', help='Device name')
-    
-    subparsers.add_parser('list-devices', help='List all devices')
-    
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("init-db")
+    user = commands.add_parser("create-user")
+    user.add_argument("username")
+    user.add_argument("email")
+    user.add_argument("--password", help="Password to hash; omit to enter it securely")
+    commands.add_parser("list-users")
+    device = commands.add_parser("create-device")
+    device.add_argument("user_id", type=int)
+    device.add_argument("name")
+    device.add_argument("--device-id")
+    commands.add_parser("list-devices")
     args = parser.parse_args()
-    
-    if not args.command:
-        parser.print_help()
-        return
-    
-    if args.command == 'init-db':
-        init_db()
-    elif args.command == 'create-user':
-        create_user(args.username, args.email)
-    elif args.command == 'list-users':
+    if args.command == "init-db":
+        return 0 if init_db() else 1
+    if args.command == "create-user":
+        password = args.password or getpass.getpass("Password: ")
+        if not password:
+            print("Password cannot be empty")
+            return 1
+        return 0 if create_user(args.username, args.email, password) else 1
+    if args.command == "create-device":
+        return 0 if create_device(args.user_id, args.name, args.device_id) else 1
+    if args.command == "list-users":
         list_users()
-    elif args.command == 'create-device':
-        create_device(args.user_id, args.device_name)
-    elif args.command == 'list-devices':
+    elif args.command == "list-devices":
         list_devices()
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

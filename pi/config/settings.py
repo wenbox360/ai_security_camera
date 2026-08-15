@@ -1,7 +1,21 @@
-
 """
 Configuration settings for the security camera system
 """
+
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+
+PI_ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(PI_ROOT / ".env")
+
+
+def _directory(name: str) -> str:
+    """Return an absolute directory path with a trailing separator."""
+    return str(PI_ROOT / name) + os.sep
+
 
 # PIR Sensor Settings
 PIR_PIN = 11
@@ -23,17 +37,17 @@ VIDEO_BITRATE = 800000  # 800kbps - reduced bitrate for faster processing
 VIDEO_FORMAT = "h264"  # Use H264 raw format for reliable encoding
 
 # File Settings
-CAPTURES_DIR = "captures/"
-SNAPSHOTS_DIR = "captures/snapshots/"
-VIDEOS_DIR = "captures/videos/"
+CAPTURES_DIR = _directory("captures")
+SNAPSHOTS_DIR = _directory("captures/snapshots")
+VIDEOS_DIR = _directory("captures/videos")
 
 # Face Recognition Settings
-FACE_EMBEDDINGS_FILE = "captures/known_faces/embeddings.json"
-FACE_IMAGES_DIR = "captures/known_faces/images/"
-FACE_METADATA_FILE = "captures/known_faces/metadata.json"
+FACE_EMBEDDINGS_FILE = str(PI_ROOT / "captures/known_faces/embeddings.json")
+FACE_IMAGES_DIR = _directory("captures/known_faces/images")
+FACE_METADATA_FILE = str(PI_ROOT / "captures/known_faces/metadata.json")
 
 # Yolo Model Settings
-YOLO_MODEL = "yolo11n.pt"
+YOLO_MODEL = os.getenv("YOLO_MODEL", "yolo11n.pt")
 
 # Behavior Analysis Settings - Video-based Dwelling Detection
 DWELLING_THRESHOLD = 30  # seconds - minimum time to consider dwelling
@@ -41,82 +55,83 @@ VIDEO_FRAME_SKIP = 3  # analyze every nth frame for efficiency
 MIN_PERSON_CONFIDENCE = 0.5  # minimum YOLO confidence for person detection
 
 # Cloud Communication Settings
-CLOUD_API_URL = "http://localhost:8000"  # Cloud API base URL
-DEVICE_ID = "pi_device_001"  # Unique device identifier
-DEVICE_API_KEY = ""  # API key for cloud authentication (set via environment or config file)
+CLOUD_API_URL = os.getenv("CLOUD_API_URL", "http://localhost:8000")
+DEVICE_ID = os.getenv("DEVICE_ID", "pi_device_001")
+DEVICE_API_KEY = os.getenv("DEVICE_API_KEY", "")
 CLOUD_SYNC_INTERVAL = 300  # seconds - how often to sync settings from cloud
+
 
 class Settings:
     """Settings configuration class"""
-    
+
     @staticmethod
     def get_pir_pin():
         return PIR_PIN
-    
+
     @staticmethod
     def get_high_res_config():
         return {
             "format": CAMERA_HIGH_RES_FORMAT,
-            "size": (CAMERA_HIGH_RES_WIDTH, CAMERA_HIGH_RES_HEIGHT)
+            "size": (CAMERA_HIGH_RES_WIDTH, CAMERA_HIGH_RES_HEIGHT),
         }
-    
+
     @staticmethod
     def get_low_res_config():
         return {
             "format": CAMERA_LOW_RES_FORMAT,
-            "size": (CAMERA_LOW_RES_WIDTH, CAMERA_LOW_RES_HEIGHT)
+            "size": (CAMERA_LOW_RES_WIDTH, CAMERA_LOW_RES_HEIGHT),
         }
-    
+
     @staticmethod
     def get_video_settings():
         return {
             "duration": VIDEO_DURATION,
             "bitrate": VIDEO_BITRATE,
-            "format": VIDEO_FORMAT
+            "format": VIDEO_FORMAT,
         }
-    
+
     @staticmethod
     def get_file_paths():
         return {
             "captures": CAPTURES_DIR,
             "snapshots": SNAPSHOTS_DIR,
-            "videos": VIDEOS_DIR
+            "videos": VIDEOS_DIR,
         }
-    
+
     @staticmethod
     def get_face_embeddings_path():
         """Get path to face embeddings file"""
         return FACE_EMBEDDINGS_FILE
-    
+
     @staticmethod
     def get_face_images_dir():
         """Get directory for face images"""
         return FACE_IMAGES_DIR
-    
+
     @staticmethod
     def get_face_metadata_path():
         """Get path to face metadata file"""
         return FACE_METADATA_FILE
-    
+
     @staticmethod
     def get_yolo_model():
         return YOLO_MODEL
-    
+
     @staticmethod
     def get_loitering_threshold():
         """Get dwelling threshold in seconds"""
         return DWELLING_THRESHOLD
-    
+
     @staticmethod
     def get_video_frame_skip():
         """Get frame skip interval for video analysis"""
         return VIDEO_FRAME_SKIP
-    
+
     @staticmethod
     def get_min_person_confidence():
         """Get minimum confidence for person detection"""
         return MIN_PERSON_CONFIDENCE
-    
+
     @staticmethod
     def get_cloud_config():
         """Get cloud communication configuration"""
@@ -124,5 +139,5 @@ class Settings:
             "api_url": CLOUD_API_URL,
             "device_id": DEVICE_ID,
             "api_key": DEVICE_API_KEY,
-            "sync_interval": CLOUD_SYNC_INTERVAL
+            "sync_interval": CLOUD_SYNC_INTERVAL,
         }

@@ -1,0 +1,8 @@
+-r requirements.txt
+
+# Test tooling is deliberately kept out of the production image.
+pytest==7.4.3
+pytest-asyncio==0.21.1
+httpx==0.25.2
+requests==2.31.0
+ruff==0.12.11

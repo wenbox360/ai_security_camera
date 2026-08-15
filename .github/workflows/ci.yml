@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            cloud/requirements.txt
+            cloud/requirements-dev.txt
+
+      - name: Validate Compose configuration
+        run: docker compose -f cloud/docker-compose.yml config --quiet
+
+      - name: Install test dependencies
+        run: python -m pip install -r cloud/requirements-dev.txt
+
+      - name: Compile Python sources
+        run: python -m compileall -q cloud pi tests
+
+      - name: Check Python style
+        run: |
+          ruff format --check cloud pi tests
+          ruff check cloud pi tests
+
+      - name: Run unit tests
+        run: python -m pytest -q tests
+
+      - name: Build production image
+        run: docker build --tag security-camera:ci cloud

@@ -1,12 +1,18 @@
 from celery import Celery
 from .config import settings
 
+_task_package = f"{__package__}.tasks"
+
 # Create Celery app
 celery_app = Celery(
     "security_camera",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["cloud.tasks.llm_analysis", "cloud.tasks.file_cleanup"]
+    include=[
+        f"{_task_package}.llm_analysis",
+        f"{_task_package}.file_cleanup",
+        f"{_task_package}.notifications",
+    ],
 )
 
 # Celery configuration

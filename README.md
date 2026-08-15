@@ -1,312 +1,109 @@
-# AI Security Camera System
+# AI Security Camera
 
-A complete cloud-based AI security camera system with Raspberry Pi edge devices, featuring face recognition, behavior analysis, and intelligent cloud processing.
+![Prototype security-camera view](images/security-camera.jpg)
 
-![alt text](/images/image.png)
+An edge-to-cloud security-camera prototype that reduces unnecessary uploads: a Raspberry Pi captures motion, runs local person and face analysis, and sends only policy-selected events to a cloud API for persistence and optional LLM review. It is a portfolio prototype, not a production-ready security product.
+
+## Why it matters
+
+Security cameras produce far more routine motion than useful signals. This project keeps the first decision at the edge: recognized people and inconclusive motion stay local, while unknown people and prolonged presence can be uploaded for review. It demonstrates hardware integration, computer vision, API design, asynchronous work, and privacy/cost-aware event routing.
 
 ## Architecture
 
+```text
+PIR sensor + Pi camera
+          |
+          v
+Raspberry Pi: capture -> YOLO person detection -> face/dwelling analysis
+          |                                          |
+          |                         event policy: only selected events upload
+          v                                          v
+FastAPI API -> MySQL + S3 media -> Redis/Celery -> optional OpenAI analysis
+                                                  |
+                                                  v
+                                            alert record/log entry
 ```
-Pi Device → Cloud API → LLM Analysis → Mobile Notifications
-    ↓           ↓           ↓              ↓
-  Local AI   FastAPI    OpenAI GPT    Push Alerts
- Processing  + MySQL   + Celery       + Dashboard
-```
 
-### System Components
+The local Docker stack supplies FastAPI, a Celery worker, MySQL, and Redis. S3 storage is used by the cloud event endpoint; an OpenAI key enables asynchronous structured analysis. The mobile UI and real push delivery are planned work: the current notification task records/logs an alert result but does not send APNs, FCM, email, or SMS.
 
-**Pi Device (Edge)**:
-- PIR motion detection
-- Camera capture (photo/video)
-- Local YOLO person detection
-- Face recognition against known faces
-- Smart filtering before cloud upload
+## Supported prototype flow
 
-**Cloud Backend**:
-- FastAPI REST API
-- MySQL database (AWS RDS)
-- Redis + Celery for async processing
-- OpenAI GPT-4 for intelligent event analysis
-- AWS S3 for media storage
-- JWT authentication for mobile
-- API key authentication for Pi devices
+1. A PIR-triggered Pi capture is analyzed with YOLO, local face recognition, and dwelling analysis.
+2. Unknown people upload; unknown dwelling is marked high priority. Known-person dwelling uploads only after 60 seconds; brief known-person and inconclusive events remain local.
+3. The cloud API authenticates the device, stores event metadata and media references, and queues analysis when Redis/Celery is available.
+4. With `OPENAI_API_KEY` configured, the worker requests structured analysis and records whether an alert is needed.
+5. Authenticated users can retrieve their devices' events and short-lived media URLs through the REST API.
 
-**Mobile App** (Future):
-- Real-time event notifications
-- Live camera feeds
-- Device management
-- Settings configuration
+Hardware capture, cloud storage credentials, and OpenAI analysis are external dependencies, so this repository does not claim a verified end-to-end deployed environment.
 
-## Quick Deployment
+## Quick start: cloud stack
 
-### Prerequisites
-
-- AWS CLI configured with appropriate permissions
-- Docker installed
-- OpenAI API key
-- jq (JSON processor): `brew install jq`
-
-### 1. Deploy Cloud Infrastructure
+Prerequisites: Docker Desktop with Compose, Python 3.11+ (for tests), and AWS credentials plus an S3 bucket if you upload real events. Copy the example before changing any secrets.
 
 ```bash
-# Configure AWS credentials
-aws configure
-
-# Deploy cloud infrastructure (creates VPC, RDS, Redis, ECS, ALB)
-cd cloud
-./setup-aws-infrastructure.sh
+cp cloud/.env.example cloud/.env
+docker compose --env-file cloud/.env -f cloud/docker-compose.yml up --build
 ```
 
-This creates:
-- VPC with public/private subnets
-- MySQL database (AWS RDS)
-- Redis cluster (AWS ElastiCache)
-- ECS cluster with Fargate
-- Application Load Balancer
-- Security groups and IAM roles
-
-### 2. Deploy Application
+In another terminal, confirm the API is running:
 
 ```bash
-# Deploy containers to ECS (requires OpenAI API key)
-./deploy.sh sk-your-openai-api-key-here
+curl http://localhost:8000/health
 ```
 
-This will:
-- Build Docker containers
-- Push to AWS ECR
-- Create ECS task definitions
-- Deploy API and worker services
-- Configure load balancer
-
-### 3. Initialize Database
+Create the local schema and a user/device credential inside the API container:
 
 ```bash
-# Initialize database and create admin user
-./init-database.sh
+docker compose --env-file cloud/.env -f cloud/docker-compose.yml exec api python -m cloud.manage init-db
+docker compose --env-file cloud/.env -f cloud/docker-compose.yml exec api python -m cloud.manage create-user demo demo@example.com
+docker compose --env-file cloud/.env -f cloud/docker-compose.yml exec api python -m cloud.manage create-device 1 front-door --device-id pi_device_001
 ```
 
-Follow prompts to:
-- Create database tables
-- Create admin user account
-- Create Pi device with API key
+Save the device API key printed by the final command. It is stored hashed and cannot be recovered. See [cloud/README.md](cloud/README.md) for API and environment details. Stop local services with `docker compose --env-file cloud/.env -f cloud/docker-compose.yml down` (add `--volumes` only when you intentionally want to discard local database data).
 
-### 4. Configure Pi Device
+## Raspberry Pi prototype
+
+Required hardware: Raspberry Pi supported by Picamera2, a compatible camera, a PIR sensor wired for the configured GPIO pin, network access, and adequate power/storage. Face recognition and YOLO dependencies can be resource-intensive on a Pi.
+
+From the repository root, use the setup script on the Pi, configure the generated device credential, then run the module:
 
 ```bash
-# Back to project root
-cd ..
-
-# Configure Pi with cloud endpoint
+./pi/setup_pi.sh
 ./setup-pi.sh
+python3 -m pi.setup_cloud --test
+python3 -m pi.main
 ```
 
-Enter the API key from step 3 when prompted.
+`setup-pi.sh` writes private connection settings to `pi/.env`; do not commit it. The edge code reads `CLOUD_API_URL`, `DEVICE_ID`, `DEVICE_API_KEY`, and optional `YOLO_MODEL` from that file.
 
-### 5. Start Security System
+## Verification
 
-On your Raspberry Pi:
+The automated suite covers pure event-routing behavior and cloud-communication retry/file handling; it does not exercise physical camera or GPIO hardware.
 
 ```bash
-cd pi
-
-# Install dependencies (one-time)
-pip install -r requirements.txt
-
-# Add known faces to known_faces/ directory
-
-# Start the security system
-python main.py
+python3 -m pip install -r cloud/requirements-dev.txt
+python3 -m compileall -q cloud pi tests
+ruff format --check cloud pi tests
+ruff check cloud pi tests
+python3 -m pytest -q tests
+docker compose -f cloud/docker-compose.yml config --quiet
+docker build --tag security-camera:local cloud
 ```
 
-## System Flow
+For device-specific smoke checks after hardware setup, run `python3 -m pi.test.test_system` on the Pi. Those checks require the device libraries and connected hardware.
 
-### Settings Configuration
-1. **Mobile App** → Updates device settings via cloud API
-2. **Cloud** → Stores settings in database
-3. **Pi Device** → Polls for settings updates periodically
+## Project map
 
-### Event Processing
-1. **PIR Sensor** → Detects motion
-2. **Camera** → Captures photo/video
-3. **YOLO** → Detects persons in image
-4. **Face Recognition** → Identifies known vs unknown persons
-5. **Smart Filtering** → Only uploads significant events:
-   - Unknown persons
-   - Known persons dwelling (>10 seconds)
-   - Suspicious behavior patterns
-6. **Cloud Upload** → Sends event data + media to cloud
-7. **LLM Analysis** → GPT-4 analyzes context and determines alert necessity
-8. **Mobile Notification** → Sends push notification if alert warranted
+| Path | Responsibility |
+| --- | --- |
+| `pi/` | Edge capture, sensors, local vision, event policy, and cloud client |
+| `cloud/` | FastAPI API, database models, Celery tasks, and container configuration |
+| `tests/` | Host-runnable tests for edge policy, cloud retries, authentication, ingestion, and retrieval |
+| `images/security-camera.jpg` | Prototype photo used above |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Local runbook and prototype deployment boundaries |
 
-## Configuration
+## Status and next steps
 
-### Pi Configuration
+Implemented: local event routing, device API-key checks, user JWT login, event retrieval, containerized local services, and optional LLM analysis. Planned: a mobile UI, real push providers, hardened secret management, observability, migration strategy, and a production deployment review.
 
-Key files:
-- `pi/config/settings.py` - Main configuration
-- `pi/config/cloud_config.py` - Cloud API settings (auto-generated)
-- `pi/known_faces/` - Directory for known face images
-
-### Cloud Configuration
-
-Environment variables (set in ECS):
-- `DATABASE_URL` - MySQL connection string
-- `REDIS_URL` - Redis connection string
-- `AWS_S3_BUCKET` - S3 bucket name
-- `OPENAI_API_KEY` - OpenAI API key
-- `JWT_SECRET_KEY` - JWT signing key
-
-## Monitoring
-
-### View Logs
-
-```bash
-# Cloud logs
-aws logs tail /ecs/security-camera-api --follow --region us-east-1
-
-# Pi logs
-tail -f pi/captures/logs/security_*.log
-```
-
-### Database Management
-
-```bash
-# Connect to running container
-aws ecs execute-command \
-  --cluster security-camera-cluster \
-  --task <task-arn> \
-  --container api \
-  --interactive \
-  --command "/bin/bash"
-
-# Inside container
-python manage.py list-users
-python manage.py list-devices
-```
-
-## Security Features
-
-### Authentication
-- **Mobile Apps**: JWT tokens with refresh mechanism
-- **Pi Devices**: API keys with device-specific permissions
-- **Cloud API**: Rate limiting and request validation
-
-### Privacy
-- **Face Data**: Stored as embeddings, not raw images
-- **Media Files**: 7-day retention policy with automatic cleanup
-- **Encryption**: TLS in transit, encrypted storage at rest
-
-### Cost Optimization
-- **Smart Filtering**: Only sends significant events to cloud
-- **Local Processing**: YOLO and face recognition run on Pi
-- **Efficient Storage**: S3 lifecycle policies for automatic cleanup
-
-## Development
-
-### Local Testing
-
-```bash
-cd cloud
-
-# Start local services
-docker-compose up -d
-
-# Run API locally
-python main.py
-
-# Run worker locally
-celery -A celery_app worker --loglevel=info
-```
-
-### Testing Components
-
-```bash
-# Test Pi camera + YOLO
-cd pi
-python test/camera_yolo_test.py
-
-# Test PIR sensor
-python test/pir_test.py
-
-# Test cloud communication
-python test_system.py
-```
-
-## Dependencies
-
-### Pi Requirements
-- OpenCV
-- YOLO (ultralytics)
-- face-recognition
-- RPi.GPIO
-- requests
-
-### Cloud Requirements
-- FastAPI
-- SQLAlchemy
-- Celery
-- Redis
-- OpenAI
-- boto3 (AWS SDK)
-
-## Key Features
-
-### Smart Event Detection
-- Motion-triggered recording
-- Person detection with YOLO
-- Face recognition for known vs unknown persons
-- Behavior analysis (dwelling, loitering patterns)
-
-### Intelligent Cloud Processing
-- Context-aware LLM analysis
-- Cost-effective filtering (only sends significant events)
-- Automatic threat assessment
-- Smart notification decisions
-
-### Scalable Architecture
-- Containerized deployment with ECS
-- Auto-scaling based on load
-- Load-balanced API endpoints
-- Managed database and cache services
-
-### Mobile Integration Ready
-- RESTful API for mobile apps
-- JWT authentication
-- Real-time event streaming
-- Device management endpoints
-
-## Troubleshooting
-
-### Common Issues
-
-**Pi can't connect to cloud**:
-- Check internet connection
-- Verify API key is correct
-- Check cloud deployment status: `aws ecs describe-services --cluster security-camera-cluster --services security-camera-api-service`
-
-**No motion detection**:
-- Check PIR sensor wiring (pin 18)
-- Test PIR: `python test/pir_test.py`
-- Check sensitivity settings
-
-**Face recognition not working**:
-- Ensure known faces are in `known_faces/` directory
-- Check image quality and lighting
-- Verify face_recognition library installation
-
-**Cloud deployment fails**:
-- Check AWS credentials and permissions
-- Verify region settings
-- Check for resource limits or conflicts
-
-### Support
-
-For issues or questions:
-1. Check the logs first (Pi and cloud)
-2. Verify network connectivity
-3. Test individual components
-4. Check AWS service status if cloud issues
-
-
-**Your AI security camera system is now ready!**
+For setup details, read [cloud/README.md](cloud/README.md) and [DEPLOYMENT.md](DEPLOYMENT.md).

@@ -1,28 +1,41 @@
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
-from typing import List, Optional
+"""FastAPI entry point for the security-camera cloud service."""
+
 import json
+import logging
 import uuid
-from datetime import datetime, timedelta
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from functools import lru_cache
+from typing import Optional
+
 import boto3
-from botocore.exceptions import ClientError
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
-from .database import get_db, SecurityEvent, Device, User, create_tables
+from .auth import authenticate_user, create_access_token, verify_api_key, verify_token
 from .config import settings
-from .auth import verify_token, verify_api_key, create_access_token
+from .database import SecurityEvent, get_db, initialize_database
+from .storage import generate_presigned_url, upload_to_s3
 from .tasks.llm_analysis import analyze_security_event
-from .storage import upload_to_s3, generate_presigned_url
 
-# Create FastAPI app
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    initialize_database()
+    yield
+
+
 app = FastAPI(
     title="AI Security Camera Cloud API",
     description="Cloud backend for AI security camera system",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
-
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -30,30 +43,96 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+security = HTTPBearer(auto_error=False)
 
-# Security scheme
-security = HTTPBearer()
 
-# AWS S3 client
-s3_client = boto3.client(
-    's3',
-    aws_access_key_id=settings.aws_access_key_id,
-    aws_secret_access_key=settings.aws_secret_access_key,
-    region_name=settings.aws_region
-)
+class LoginRequest(BaseModel):
+    username: str
+    password: str
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database tables on startup"""
-    create_tables()
 
-# Health check endpoint
+@lru_cache(maxsize=1)
+def get_s3_client():
+    """Build the S3 client lazily so imports and local tests never need AWS."""
+    return boto3.client("s3", region_name=settings.aws_region)
+
+
+def require_bearer(credentials: Optional[HTTPAuthorizationCredentials]) -> str:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Bearer token required"
+        )
+    return credentials.credentials
+
+
+def parse_json(value: str, expected_type: type, field_name: str):
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=422, detail=f"{field_name} must be valid JSON"
+        ) from exc
+    if not isinstance(parsed, expected_type):
+        raise HTTPException(
+            status_code=422, detail=f"{field_name} has an invalid shape"
+        )
+    return parsed
+
+
+def parse_detected_at(value: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422, detail="detected_at must be ISO 8601"
+        ) from exc
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def serialize_event(event: SecurityEvent, s3_client) -> dict:
+    return {
+        "event_id": event.event_id,
+        "event_type": event.event_type,
+        "confidence_score": event.confidence_score,
+        "image_url": generate_presigned_url(
+            event.image_url, s3_client, settings.s3_bucket_name
+        )
+        if event.image_url
+        else None,
+        "video_url": generate_presigned_url(
+            event.video_url, s3_client, settings.s3_bucket_name
+        )
+        if event.video_url
+        else None,
+        "detected_at": event.detected_at,
+        "alert_triggered": event.alert_triggered,
+        "alert_reason": event.alert_reason,
+        "llm_analysis": json.loads(event.llm_analysis) if event.llm_analysis else None,
+        "device_name": event.device.name,
+    }
+
+
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": datetime.utcnow()}
+    return {"status": "healthy", "timestamp": datetime.now(timezone.utc)}
 
-# Pi Device Endpoints
-@app.post("/api/v1/events")
+
+@app.post("/api/v1/auth/login")
+async def login(payload: LoginRequest, db: Session = Depends(get_db)):
+    user = authenticate_user(payload.username, payload.password, db)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return {
+        "access_token": create_access_token({"sub": user.username}),
+        "token_type": "bearer",
+    }
+
+
+@app.post("/api/v1/events", status_code=status.HTTP_201_CREATED)
 async def create_security_event(
     event_type: str = Form(...),
     confidence_score: float = Form(...),
@@ -62,181 +141,162 @@ async def create_security_event(
     face_analysis: str = Form("{}"),
     image: UploadFile = File(...),
     video: Optional[UploadFile] = File(None),
-    device_credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
+    device_credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db),
 ):
-    """
-    Create a new security event from Pi device
-    """
-    # Verify Pi device
-    device = verify_api_key(device_credentials.credentials, db)
+    device = verify_api_key(require_bearer(device_credentials), db)
     if not device:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    
-    # Generate unique event ID
-    event_id = str(uuid.uuid4())
-    
-    try:
-        # Upload image to S3
-        image_key = f"events/{event_id}/image.jpg"
-        image_url = upload_to_s3(image.file, image_key, s3_client, settings.s3_bucket_name)
-        
-        # Upload video if provided
-        video_url = None
-        if video:
-            video_key = f"events/{event_id}/video.mp4"
-            video_url = upload_to_s3(video.file, video_key, s3_client, settings.s3_bucket_name)
-        
-        # Create security event
-        event = SecurityEvent(
-            event_id=event_id,
-            device_id=device.id,
-            event_type=event_type,
-            confidence_score=confidence_score,
-            image_url=image_url,
-            video_url=video_url,
-            detected_objects=detected_objects,
-            face_analysis=face_analysis,
-            detected_at=datetime.fromisoformat(detected_at.replace('Z', '+00:00')),
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid device credentials",
         )
-        
-        db.add(event)
+    objects = parse_json(detected_objects, list, "detected_objects")
+    faces = parse_json(face_analysis, dict, "face_analysis")
+    detected_time = parse_detected_at(detected_at)
+    event_id, s3_client = str(uuid.uuid4()), get_s3_client()
+    try:
+        image_url = upload_to_s3(
+            image.file,
+            f"events/{event_id}/image.jpg",
+            s3_client,
+            settings.s3_bucket_name,
+        )
+        video_url = (
+            upload_to_s3(
+                video.file,
+                f"events/{event_id}/video.mp4",
+                s3_client,
+                settings.s3_bucket_name,
+            )
+            if video
+            else None
+        )
+        db.add(
+            SecurityEvent(
+                event_id=event_id,
+                device_id=device.id,
+                event_type=event_type,
+                confidence_score=confidence_score,
+                image_url=image_url,
+                video_url=video_url,
+                detected_objects=json.dumps(objects),
+                face_analysis=json.dumps(faces),
+                detected_at=detected_time,
+            )
+        )
         db.commit()
-        db.refresh(event)
-        
-        # Queue LLM analysis task
-        task = analyze_security_event.delay(event_id)
-        
-        return {
-            "event_id": event_id,
-            "status": "created",
-            "analysis_task_id": task.id,
-            "message": "Event created and queued for analysis"
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create event: {str(e)}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Unable to persist security event")
+        raise HTTPException(
+            status_code=500, detail="Unable to create security event"
+        ) from exc
+    response = {"event_id": event_id, "status": "created", "analysis_task_id": None}
+    try:
+        response["analysis_task_id"] = analyze_security_event.delay(event_id).id
+    except Exception:
+        logger.exception(
+            "Event %s was saved but could not be queued for analysis", event_id
+        )
+        response["analysis_status"] = "queue_unavailable"
+    return response
+
 
 @app.get("/api/v1/devices/{device_id}/settings")
 async def get_device_settings(
     device_id: str,
-    device_credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
+    device_credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db),
 ):
-    """
-    Get device settings for Pi
-    """
-    device = verify_api_key(device_credentials.credentials, db)
+    device = verify_api_key(require_bearer(device_credentials), db)
     if not device or device.device_id != device_id:
-        raise HTTPException(status_code=401, detail="Invalid API key or device ID")
-    
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid device credentials",
+        )
     return {
         "device_id": device.device_id,
-        "notification_preferences": json.loads(device.notification_preferences) if device.notification_preferences else {},
+        "notification_preferences": json.loads(device.notification_preferences)
+        if device.notification_preferences
+        else {},
         "detection_sensitivity": device.detection_sensitivity,
         "face_embeddings": [
-            {
-                "name": embedding.name,
-                "embedding": json.loads(embedding.embedding)
-            }
-            for embedding in device.owner.face_embeddings
-        ]
+            {"id": item.id, "name": item.name, "embedding": json.loads(item.embedding)}
+            for item in (device.owner.face_embeddings if device.owner else [])
+        ],
     }
 
-# Mobile App Endpoints
+
+def get_current_user(credentials: Optional[HTTPAuthorizationCredentials], db: Session):
+    user = verify_token(require_bearer(credentials), db)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token"
+        )
+    return user
+
+
 @app.get("/api/v1/events")
 async def get_events(
     skip: int = 0,
     limit: int = 50,
     alert_only: bool = False,
-    token: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db),
 ):
-    """
-    Get security events for mobile app
-    """
-    user = verify_token(token.credentials, db)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    
-    # Get user's devices
-    device_ids = [device.id for device in user.devices]
-    
-    # Query events
+    if skip < 0 or not 1 <= limit <= 100:
+        raise HTTPException(
+            status_code=422,
+            detail="skip must be non-negative and limit must be between 1 and 100",
+        )
+    device_ids = [device.id for device in get_current_user(credentials, db).devices]
     query = db.query(SecurityEvent).filter(SecurityEvent.device_id.in_(device_ids))
-    
     if alert_only:
-        query = query.filter(SecurityEvent.alert_triggered == True)
-    
-    events = query.order_by(SecurityEvent.detected_at.desc()).offset(skip).limit(limit).all()
-    
-    # Generate presigned URLs for images/videos
-    for event in events:
-        if event.image_url:
-            event.image_url = generate_presigned_url(event.image_url, s3_client, settings.s3_bucket_name)
-        if event.video_url:
-            event.video_url = generate_presigned_url(event.video_url, s3_client, settings.s3_bucket_name)
-    
+        query = query.filter(SecurityEvent.alert_triggered.is_(True))
+    s3_client = get_s3_client()
     return [
-        {
-            "event_id": event.event_id,
-            "event_type": event.event_type,
-            "confidence_score": event.confidence_score,
-            "image_url": event.image_url,
-            "video_url": event.video_url,
-            "detected_at": event.detected_at,
-            "alert_triggered": event.alert_triggered,
-            "alert_reason": event.alert_reason,
-            "llm_analysis": json.loads(event.llm_analysis) if event.llm_analysis else None,
-            "device_name": event.device.name
-        }
-        for event in events
+        serialize_event(event, s3_client)
+        for event in query.order_by(SecurityEvent.detected_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
     ]
+
 
 @app.get("/api/v1/events/{event_id}")
 async def get_event_details(
     event_id: str,
-    token: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db),
 ):
-    """
-    Get detailed information about a specific event
-    """
-    user = verify_token(token.credentials, db)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    
-    # Get user's devices
-    device_ids = [device.id for device in user.devices]
-    
-    event = db.query(SecurityEvent).filter(
-        SecurityEvent.event_id == event_id,
-        SecurityEvent.device_id.in_(device_ids)
-    ).first()
-    
-    if not event:
+    device_ids = [device.id for device in get_current_user(credentials, db).devices]
+    event = (
+        db.query(SecurityEvent)
+        .filter(
+            SecurityEvent.event_id == event_id, SecurityEvent.device_id.in_(device_ids)
+        )
+        .first()
+    )
+    if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
-    
-    # Generate presigned URLs
-    image_url = generate_presigned_url(event.image_url, s3_client, settings.s3_bucket_name) if event.image_url else None
-    video_url = generate_presigned_url(event.video_url, s3_client, settings.s3_bucket_name) if event.video_url else None
-    
-    return {
-        "event_id": event.event_id,
-        "event_type": event.event_type,
-        "confidence_score": event.confidence_score,
-        "image_url": image_url,
-        "video_url": video_url,
-        "detected_objects": json.loads(event.detected_objects) if event.detected_objects else [],
-        "face_analysis": json.loads(event.face_analysis) if event.face_analysis else {},
-        "llm_analysis": json.loads(event.llm_analysis) if event.llm_analysis else None,
-        "detected_at": event.detected_at,
-        "processed_at": event.processed_at,
-        "alert_triggered": event.alert_triggered,
-        "alert_reason": event.alert_reason,
-        "device_name": event.device.name
-    }
+    result = serialize_event(event, get_s3_client())
+    result.update(
+        {
+            "detected_objects": json.loads(event.detected_objects)
+            if event.detected_objects
+            else [],
+            "face_analysis": json.loads(event.face_analysis)
+            if event.face_analysis
+            else {},
+            "processed_at": event.processed_at,
+        }
+    )
+    return result
+
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host=settings.host, port=settings.port, debug=settings.debug)
+
+    uvicorn.run(app, host=settings.host, port=settings.port)

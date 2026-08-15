@@ -1,0 +1,48 @@
+# Python bytecode and tooling
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Device data and downloaded models
+pi/captures/
+pi/known_faces/
+*.log
+*.pt
+*.onnx
+
+# Generated cloud deployment files
+cloud/aws-config.json
+cloud/api-task-definition.json
+cloud/worker-task-definition.json
+cloud/lifecycle.json
+cloud/trust-policy.json
+cloud/s3-policy.json
+
+# Local databases and operating-system files
+*.db
+*.sqlite
+*.sqlite3
+.DS_Store
+
+# Editors
+.idea/
+.vscode/

@@ -1,10 +1,11 @@
 from picamera2 import Picamera2
 from ultralytics import YOLO
-import cv2
 
 # Initialize camera
 picam2 = Picamera2()
-picam2.configure(picam2.create_preview_configuration(main={"format": "RGB888", "size": (640, 480)}))
+picam2.configure(
+    picam2.create_preview_configuration(main={"format": "RGB888", "size": (640, 480)})
+)
 picam2.start()
 
 # Load YOLO model once
@@ -23,4 +24,3 @@ results[0].save(filename="detection.jpg")
 # cv2.imshow("Detection", results[0].plot())
 # cv2.waitKey(0)
 # cv2.destroyAllWindows()s
-

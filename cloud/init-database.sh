@@ -1,9 +1,19 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # AI Security Camera - Database Initialization Script
 # This script initializes the database and creates initial users/devices
 
-set -e
+set -euo pipefail
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+cd "$SCRIPT_DIR"
+
+for command in aws jq; do
+    if ! command -v "$command" >/dev/null 2>&1; then
+        echo "Required command not found: $command" >&2
+        exit 1
+    fi
+done
 
 echo "🗄️  AI Security Camera - Database Initialization"
 echo "==============================================="
@@ -16,8 +26,8 @@ if [ ! -f "aws-config.json" ]; then
 fi
 
 # Load configuration
-AWS_REGION=$(jq -r '.region' aws-config.json)
-ECS_CLUSTER=$(jq -r '.ecs_cluster' aws-config.json)
+AWS_REGION=$(jq -er '.region' aws-config.json)
+ECS_CLUSTER=$(jq -er '.ecs_cluster' aws-config.json)
 PROJECT_NAME="security-camera"
 
 echo "📋 Configuration:"
@@ -27,7 +37,7 @@ echo ""
 
 # Get running API task
 echo "🔍 Finding running API task..."
-TASK_ARN=$(aws ecs list-tasks --cluster $ECS_CLUSTER --service-name ${PROJECT_NAME}-api-service --region $AWS_REGION --query 'taskArns[0]' --output text)
+TASK_ARN=$(aws ecs list-tasks --cluster "$ECS_CLUSTER" --service-name "${PROJECT_NAME}-api-service" --region "$AWS_REGION" --query 'taskArns[0]' --output text)
 
 if [ "$TASK_ARN" = "None" ] || [ -z "$TASK_ARN" ]; then
     echo "❌ No running API tasks found!"
@@ -42,12 +52,12 @@ echo ""
 # Initialize database
 echo "🔧 Initializing database tables..."
 aws ecs execute-command \
-    --cluster $ECS_CLUSTER \
-    --task $TASK_ARN \
+    --cluster "$ECS_CLUSTER" \
+    --task "$TASK_ARN" \
     --container api \
     --interactive \
-    --command "python manage.py init-db" \
-    --region $AWS_REGION
+    --command "python -m cloud.manage init-db" \
+    --region "$AWS_REGION"
 
 echo "✅ Database initialized"
 echo ""
@@ -55,32 +65,35 @@ echo ""
 # Create admin user
 echo "👤 Creating admin user..."
 echo "Please enter admin credentials:"
-read -p "Username: " ADMIN_USERNAME
-read -p "Email: " ADMIN_EMAIL
+read -r -p "Username: " ADMIN_USERNAME
+read -r -p "Email: " ADMIN_EMAIL
+ADMIN_USERNAME_Q=$(printf '%q' "$ADMIN_USERNAME")
+ADMIN_EMAIL_Q=$(printf '%q' "$ADMIN_EMAIL")
 
 aws ecs execute-command \
-    --cluster $ECS_CLUSTER \
-    --task $TASK_ARN \
+    --cluster "$ECS_CLUSTER" \
+    --task "$TASK_ARN" \
     --container api \
     --interactive \
-    --command "python manage.py create-user $ADMIN_USERNAME $ADMIN_EMAIL" \
-    --region $AWS_REGION
+    --command "python -m cloud.manage create-user $ADMIN_USERNAME_Q $ADMIN_EMAIL_Q" \
+    --region "$AWS_REGION"
 
 echo "✅ Admin user created"
 echo ""
 
 # Create Pi device
 echo "🔧 Creating Pi device..."
-read -p "Device name (e.g., 'Living Room Pi'): " DEVICE_NAME
+read -r -p "Device name (e.g., 'Living Room Pi'): " DEVICE_NAME
+DEVICE_NAME_Q=$(printf '%q' "$DEVICE_NAME")
 
 echo "Creating device for user ID 1..."
 aws ecs execute-command \
-    --cluster $ECS_CLUSTER \
-    --task $TASK_ARN \
+    --cluster "$ECS_CLUSTER" \
+    --task "$TASK_ARN" \
     --container api \
     --interactive \
-    --command "python manage.py create-device 1 \"$DEVICE_NAME\"" \
-    --region $AWS_REGION
+    --command "python -m cloud.manage create-device 1 $DEVICE_NAME_Q" \
+    --region "$AWS_REGION"
 
 echo ""
 echo "✅ Database initialization complete!"
@@ -91,5 +104,5 @@ echo "2. Use this API key to configure your Pi device"
 echo "3. Your cloud API URL is: http://$(jq -r '.alb_dns' aws-config.json)"
 echo ""
 echo "🔍 Verify setup:"
-echo "  List users: aws ecs execute-command --cluster $ECS_CLUSTER --task $TASK_ARN --container api --interactive --command \"python manage.py list-users\" --region $AWS_REGION"
-echo "  List devices: aws ecs execute-command --cluster $ECS_CLUSTER --task $TASK_ARN --container api --interactive --command \"python manage.py list-devices\" --region $AWS_REGION"
+echo "  List users: aws ecs execute-command --cluster $ECS_CLUSTER --task $TASK_ARN --container api --interactive --command \"python -m cloud.manage list-users\" --region $AWS_REGION"
+echo "  List devices: aws ecs execute-command --cluster $ECS_CLUSTER --task $TASK_ARN --container api --interactive --command \"python -m cloud.manage list-devices\" --region $AWS_REGION"

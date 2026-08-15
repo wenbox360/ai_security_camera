@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.pytest_cache/
+aws-config.json
+*-task-definition.json
+*.log
+README.md
+CLOUD_DEPLOYMENT.md
